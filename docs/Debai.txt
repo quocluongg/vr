@@ -1,0 +1,65 @@
+Đồ án cuối kỳ VR: VR Color Circle phân loại màu theo cấp độ
+
+Mục tiêu:
+
+  * Xây dựng ứng dụng VR giúp nhận diện và phân loại màu sắc
+
+  * Tăng tính tương tác và phản xạ thông qua gameplay
+
+Nội dung chính:
+
+  * Thiết kế 3 level:
+
+    * Level 1: Màu cơ bản (Primary)
+
+    * Level 2: Màu thứ cấp (Secondary)
+
+    * Level 3: Màu bậc ba (Tertiary)
+
+  
+
+  * Trong mỗi level:
+
+    * Người chơi chọn bi hoặc thẻ màu
+
+    * Gắn vào đúng vị trí trên vòng tròn màu
+
+  
+
+  * Điều kiện qua level:
+
+    * Đúng toàn bộ màu → mở khóa level tiếp theo
+
+    * Hoàn thành level 3 → chiến thắng
+
+Chế độ chơi:
+
+  * Easy: Không giới hạn thời gian
+
+  * Hard: Giới hạn thời gian ngắn
+
+Yêu cầu kỹ thuật:
+
+  * Có âm thanh nền
+
+  * Có hiệu ứng âm thanh khi thao tác
+
+  * Tối ưu hiệu năng, chạy mượt trong môi trường VR
+
+Sản phẩm nộp:
+
+  * Demo chạy được
+
+  * Source code
+
+  * Báo cáo Word
+
+  * Slide PowerPoint thuyết trình
+
+Ưu tiên khi đánh giá:
+
+ * Tối ưu và nhẹ (chạy mượt)
+
+ * Mỹ thuật và trực quan
+
+ * Tính tương tác hoặc mở rộng thêm
