@@ -6,6 +6,8 @@ class ChromaAudio {
   private bgmNodes: { oscillators: OscillatorNode[]; gain: GainNode } | null = null;
   private enabled: boolean = true;
   private isBgmPlaying: boolean = false;
+  private bgmInterval: any = null;
+  private bgmStep: number = 0;
 
   private init() {
     try {
@@ -240,64 +242,103 @@ class ChromaAudio {
     }
   }
 
-  // Start background ambient music (drone synth)
+    // Helper to play a single BGM note with pluck/bubble style release
+  private playBgmNote(freq: number, isBass: boolean = false) {
+    try {
+      if (!this.ctx || !this.enabled) return;
+      this.resumeCtx();
+
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      if (isBass) {
+        // Soft bass note
+        osc.type = "triangle";
+        osc.frequency.setValueAtTime(freq, now);
+
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.04, now + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.55);
+      } else {
+        // Cute high bubble synth pluck
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now);
+
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.05, now + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+        // Simple low-pass filter to make it sound cute and warm
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(1200, now);
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now);
+        osc.stop(now + 0.25);
+      }
+    } catch (e) {
+      console.warn("BGM Note error:", e);
+    }
+  }
+
+  // Start background ambient music (cheerful 8-bit pentatonic arpeggio & bass loop)
   public startBGM() {
     try {
       this.init();
       if (!this.ctx || !this.enabled || this.isBgmPlaying) return;
       this.resumeCtx();
 
-      const now = this.ctx.currentTime;
-      const gainNode = this.ctx.createGain();
-      gainNode.gain.setValueAtTime(0, now);
-      gainNode.gain.linearRampToValueAtTime(0.04, now + 2.0); // Fade in over 2s
-
-      const osc1 = this.ctx.createOscillator();
-      const osc2 = this.ctx.createOscillator();
-      const osc3 = this.ctx.createOscillator();
-
-      // Minor triad / ambient chord (C3, G3, C4)
-      osc1.type = "sine";
-      osc1.frequency.setValueAtTime(130.81, now); // C3
-
-      osc2.type = "sine";
-      osc2.frequency.setValueAtTime(196.00, now); // G3
-
-      osc3.type = "triangle";
-      osc3.frequency.setValueAtTime(261.63, now); // C4
-
-      // Modulate frequencies slightly for a chorus/richer effect
-      const lfo = this.ctx.createOscillator();
-      const lfoGain = this.ctx.createGain();
-      lfo.frequency.setValueAtTime(0.2, now); // 0.2 Hz LFO
-      lfoGain.gain.setValueAtTime(0.5, now);
-
-      lfo.connect(lfoGain);
-      lfoGain.connect(osc1.frequency);
-      lfoGain.connect(osc3.frequency);
-
-      // Filter to cut off highs
-      const filter = this.ctx.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(350, now);
-
-      osc1.connect(filter);
-      osc2.connect(filter);
-      osc3.connect(filter);
-
-      filter.connect(gainNode);
-      gainNode.connect(this.ctx.destination);
-
-      lfo.start();
-      osc1.start();
-      osc2.start();
-      osc3.start();
-
-      this.bgmNodes = {
-        oscillators: [osc1, osc2, osc3, lfo],
-        gain: gainNode,
-      };
       this.isBgmPlaying = true;
+      this.bgmStep = 0;
+
+      // Cheerful major pentatonic melody
+      const MELODY = [
+        329.63, 392.00, 523.25, 392.00, // E4, G4, C5, G4
+        349.23, 440.00, 523.25, 440.00, // F4, A4, C5, A4
+        392.00, 493.88, 587.33, 493.88, // G4, B4, D5, B4
+        523.25, 659.25, 523.25, 392.00, // C5, E5, C5, G4
+      ];
+
+      // Bass notes (I - IV - V - I chord progression)
+      const BASS = [
+        130.81, // C3
+        174.61, // F3
+        196.00, // G3
+        130.81, // C3
+      ];
+
+      const stepDuration = 0.28; // 280ms per step (approx 107 BPM)
+
+      const playNextStep = () => {
+        if (!this.isBgmPlaying || !this.ctx) return;
+
+        const melodyNote = MELODY[this.bgmStep % MELODY.length];
+        this.playBgmNote(melodyNote, false);
+
+        if (this.bgmStep % 4 === 0) {
+          const bassIndex = Math.floor((this.bgmStep % MELODY.length) / 4);
+          const bassNote = BASS[bassIndex % BASS.length];
+          this.playBgmNote(bassNote, true);
+        }
+
+        this.bgmStep++;
+      };
+
+      // Play step 0 immediately
+      playNextStep();
+
+      // Schedule the interval
+      this.bgmInterval = setInterval(playNextStep, stepDuration * 1000);
     } catch (e) {
       console.warn("Audio startBGM error:", e);
     }
@@ -306,24 +347,10 @@ class ChromaAudio {
   // Stop background music
   public stopBGM() {
     try {
-      if (!this.ctx || !this.bgmNodes) return;
-      const now = this.ctx.currentTime;
-
-      try {
-        this.bgmNodes.gain.gain.setValueAtTime(this.bgmNodes.gain.gain.value, now);
-        this.bgmNodes.gain.gain.linearRampToValueAtTime(0, now + 1.0); // Fade out
-
-        const oscs = this.bgmNodes.oscillators;
-        setTimeout(() => {
-          oscs.forEach((osc) => {
-            try {
-              osc.stop();
-            } catch (e) {}
-          });
-        }, 1000);
-      } catch (e) {}
-
-      this.bgmNodes = null;
+      if (this.bgmInterval) {
+        clearInterval(this.bgmInterval);
+        this.bgmInterval = null;
+      }
       this.isBgmPlaying = false;
     } catch (e) {
       console.warn("Audio stopBGM error:", e);

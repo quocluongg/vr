@@ -5,6 +5,7 @@ import { useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls, Stars, Text, Cylinder, Sparkles } from "@react-three/drei";
 import { useGame, ALL_COLORS, ColorData } from "@/context/GameContext";
 import { audio } from "@/utils/audio";
+import { useXR, XROrigin } from "@react-three/xr";
 import ChromaBot3D from "./ChromaBot3D";
 import ColorMixer3D from "./ColorMixer3D";
 import * as THREE from "three";
@@ -57,10 +58,17 @@ export default function VRScene() {
     isLevelComplete,
     nextLevel,
     resetGame,
-    isColorBlindMode
+    isColorBlindMode,
+    setIsVRActive
   } = useGame();
 
   const { gl } = useThree();
+
+  const isPresenting = useXR((state) => !!state.session);
+
+  useEffect(() => {
+    setIsVRActive(isPresenting);
+  }, [isPresenting, setIsVRActive]);
 
   // Active spheres on the table/mixer
   const [spheres, setSpheres] = useState<SphereState[]>([]);
@@ -428,6 +436,8 @@ export default function VRScene() {
 
   return (
     <>
+      <color attach="background" args={["#7dd3fc"]} />
+      <XROrigin position={[0, 0, 0.6]} />
       {/* Volumetric sky-blue meadow fog */}
       <fog attach="fog" args={["#bae6fd", 8, 22]} />
 
