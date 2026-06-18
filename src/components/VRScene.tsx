@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useFrame } from "@react-three/fiber";
 import { OrbitControls, Stars, Text, Cylinder, Sparkles } from "@react-three/drei";
 import { useGame, ALL_COLORS, ColorData } from "@/context/GameContext";
 import { audio } from "@/utils/audio";
@@ -62,7 +62,6 @@ export default function VRScene() {
     setIsVRActive
   } = useGame();
 
-  const { gl } = useThree();
 
   const isPresenting = useXR((state) => !!state.session);
 
@@ -86,10 +85,7 @@ export default function VRScene() {
     { colorId: "blue", hex: "#3B82F6", pos: [0.18, 0.77, -0.48] },
   ];
 
-  // Set bright sky blue clear color for background
-  useEffect(() => {
-    gl.setClearColor(new THREE.Color("#7dd3fc"));
-  }, [gl]);
+  // Clear color is set in VRCanvas onCreated — do not set here to avoid overriding XR framebuffer setup
 
   // Re-initialize spheres when level changes or game restarts
   useEffect(() => {
@@ -441,8 +437,8 @@ export default function VRScene() {
       {/* Volumetric sky-blue meadow fog */}
       <fog attach="fog" args={["#bae6fd", 8, 22]} />
 
-      {/* PC Orbit Camera Controls */}
-      {!isVRActive && (
+      {/* PC Orbit Camera Controls - disabled the moment XR session starts (isPresenting) */}
+      {!isPresenting && (
         <OrbitControls
           enableZoom={true}
           minDistance={0.5}

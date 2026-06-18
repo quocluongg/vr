@@ -6,19 +6,7 @@ import { useGame } from "@/context/GameContext";
 import { XR } from "@react-three/xr";
 import { xrStore } from "@/utils/xrStore";
 import VRScene from "./VRScene";
-
-// Polyfill/Patch for WebXR Emulator compatibility (resolves Chrome WebXR Layers crash)
-if (typeof window !== "undefined" && typeof (window as any).XRWebGLBinding !== "undefined") {
-  try {
-    const proto = (window as any).XRWebGLBinding.prototype;
-    if (proto && proto.createProjectionLayer) {
-      delete proto.createProjectionLayer;
-      console.log("Patched XRWebGLBinding.prototype.createProjectionLayer to bypass emulator crash.");
-    }
-  } catch (e) {
-    console.warn("Failed to patch XRWebGLBinding", e);
-  }
-}
+import * as THREE from "three";
 
 export default function VRCanvas() {
   const { gameState } = useGame();
@@ -31,7 +19,14 @@ export default function VRCanvas() {
       <Canvas
         camera={{ position: [0, 1.5, 1.2], fov: 60 }}
         shadows
+        // alpha: false + explicit opaque clear = fully opaque XR framebuffer on Meta Quest
         gl={{ antialias: true, alpha: false }}
+        onCreated={({ gl }) => {
+          // Ensure the renderer uses a fully opaque sky-blue background.
+          // This is critical for Meta Quest: the XR compositor reads the clear color
+          // from the WebGLRenderer. Without this, Quest may show passthrough (real world).
+          gl.setClearColor(new THREE.Color("#7dd3fc"), 1);
+        }}
       >
         <XR store={xrStore}>
           <VRScene />
