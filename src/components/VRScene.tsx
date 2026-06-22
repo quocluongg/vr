@@ -251,15 +251,6 @@ export default function VRScene() {
     const sphere = spheres.find((s) => s.id === id);
     if (sphere && sphere.status === "placed") return;
 
-    // Capture the pointer on the clicked element to prevent losing events when drag speeds are high
-    if (e.target && typeof e.target.setPointerCapture === "function") {
-      try {
-        e.target.setPointerCapture(e.pointerId);
-      } catch (err) {
-        console.warn("Failed to set pointer capture:", err);
-      }
-    }
-
     audio.playGrab();
     setDraggedId(id);
 
@@ -272,9 +263,8 @@ export default function VRScene() {
     );
   };
 
-  const handlePointerMove = (e: any, id?: string) => {
-    const activeId = id || draggedId;
-    if (!activeId || gameState !== "playing") return;
+  const handlePointerMove = (e: any) => {
+    if (!draggedId || gameState !== "playing") return;
     e.stopPropagation();
 
     // Project input position onto a virtual flat vertical plane at z = -0.65 (where table spheres reside)
@@ -291,7 +281,7 @@ export default function VRScene() {
 
     setSpheres((prev) =>
       prev.map((s) =>
-        s.id === activeId
+        s.id === draggedId
           ? {
               ...s,
               position: [
@@ -305,22 +295,14 @@ export default function VRScene() {
     );
   };
 
-  const handlePointerUp = (e?: any, id?: string) => {
-    const activeId = id || draggedId;
-    if (!activeId || gameState !== "playing") return;
+  const handlePointerUp = (e?: any) => {
+    if (!draggedId || gameState !== "playing") return;
 
     if (e) {
       e.stopPropagation();
-      if (e.target && e.pointerId !== undefined) {
-        try {
-          e.target.releasePointerCapture(e.pointerId);
-        } catch (err) {
-          console.warn("Failed to release pointer capture:", err);
-        }
-      }
     }
 
-    const activeSphere = spheres.find((s) => s.id === activeId);
+    const activeSphere = spheres.find((s) => s.id === draggedId);
     if (!activeSphere) {
       setDraggedId(null);
       return;
@@ -346,7 +328,7 @@ export default function VRScene() {
             audio.playSnap();
             setSpheres((prev) =>
               prev.map((s) =>
-                s.id === activeId
+                s.id === draggedId
                   ? {
                       ...s,
                       position: [slotPos.x, slotPos.y + 0.045, slotPos.z],
@@ -387,7 +369,7 @@ export default function VRScene() {
         setMixerSlot1(activeSphere);
         setSpheres((prev) =>
           prev.map((s) =>
-            s.id === activeId
+            s.id === draggedId
               ? {
                   ...s,
                   position: [slot1Pos.x, slot1Pos.y, slot1Pos.z],
@@ -409,7 +391,7 @@ export default function VRScene() {
         setMixerSlot2(activeSphere);
         setSpheres((prev) =>
           prev.map((s) =>
-            s.id === activeId
+            s.id === draggedId
               ? {
                   ...s,
                   position: [slot2Pos.x, slot2Pos.y, slot2Pos.z],
@@ -432,7 +414,7 @@ export default function VRScene() {
       audio.playFail();
       setSpheres((prev) =>
         prev.map((s) =>
-          s.id === activeId
+          s.id === draggedId
             ? { ...s, position: [...s.spawnPosition] as [number, number, number] }
             : s
         )
@@ -442,7 +424,7 @@ export default function VRScene() {
       audio.playFail();
       setSpheres((prev) =>
         prev.map((s) =>
-          s.id === activeId
+          s.id === draggedId
             ? { ...s, position: [s.spawnPosition[0], 0.77, s.spawnPosition[2]] as [number, number, number] }
             : s
         )
@@ -918,8 +900,6 @@ export default function VRScene() {
           sphere={sphere}
           draggedId={draggedId}
           handlePointerDown={handlePointerDown}
-          handlePointerMove={handlePointerMove}
-          handlePointerUp={handlePointerUp}
           gameState={gameState}
           isMixing={isMixing}
           isColorBlindMode={isColorBlindMode}
@@ -1087,8 +1067,6 @@ interface InteractiveSphereProps {
   sphere: SphereState;
   draggedId: string | null;
   handlePointerDown: (id: string, e: any) => void;
-  handlePointerMove: (e: any, id?: string) => void;
-  handlePointerUp: (e?: any, id?: string) => void;
   gameState: string;
   isMixing: boolean;
   isColorBlindMode: boolean;
@@ -1098,8 +1076,6 @@ function InteractiveSphere({
   sphere,
   draggedId,
   handlePointerDown,
-  handlePointerMove,
-  handlePointerUp,
   gameState,
   isMixing,
   isColorBlindMode,
@@ -1184,8 +1160,6 @@ function InteractiveSphere({
     <group
       ref={groupRef}
       onPointerDown={(e) => handlePointerDown(sphere.id, e)}
-      onPointerMove={(e) => handlePointerMove(e, sphere.id)}
-      onPointerUp={(e) => handlePointerUp(e, sphere.id)}
       onPointerOver={() => {
         if (gameState === "playing" && !isMixing && sphere.status !== "placed") {
           document.body.style.cursor = "grab";
