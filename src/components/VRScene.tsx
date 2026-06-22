@@ -77,99 +77,337 @@ export default function VRScene() {
 
   const session = useXR((state) => state.session);
   const isPresenting = !!session;
+  const originReferenceSpace = useXR((state) => state.originReferenceSpace);
 
   useEffect(() => {
     setIsVRActive(isPresenting);
   }, [isPresenting, setIsVRActive]);
 
+  // Refs for VR controller grab state
+  const vrDraggedIdRef = useRef<string | null>(null);
+  const vrControllerHandRef = useRef<"left" | "right" | null>(null);
+  const vrTriggerPrevState = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const vrGripPrevState = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
+
   // Track controller buttons A/X and B/Y state
   const buttonAPrevState = useRef(false);
   const buttonBPrevState = useRef(false);
 
-  useFrame(() => {
-    if (session) {
-      let buttonAPressedThisFrame = false;
-      let buttonBPressedThisFrame = false;
-      const inputs = Array.from(session.inputSources);
-      inputs.forEach((inputSource) => {
-        const gamepad = inputSource.gamepad;
-        if (gamepad) {
-          // A or X button (Index 4)
-          const buttonA = gamepad.buttons[4];
-          if (buttonA && buttonA.pressed) {
-            buttonAPressedThisFrame = true;
+  // VR Locomotion: XROrigin ref for joystick movement
+  const xrOriginRef = useRef<THREE.Group>(null);
+  const snapTurnCooldown = useRef(false); // prevent rapid snap-turns
+  const MOVE_SPEED = 1.8; // m/s
+  const SNAP_ANGLE = Math.PI / 4; // 45 degrees snap turn
+
+  useFrame((state) => {
+    if (!session) return;
+    const xrFrame = state.gl.xr.getFrame ? state.gl.xr.getFrame() : null;
+    const refSpace = originReferenceSpace ?? (state.gl.xr as any).getReferenceSpace?.();
+
+    // Helper: get world position of an XRInputSource's grip or ray space
+    const getInputSourcePos = (inputSource: XRInputSource): THREE.Vector3 => {
+      const pos = new THREE.Vector3();
+      if (xrFrame && refSpace) {
+        const space = inputSource.gripSpace ?? inputSource.targetRaySpace;
+        if (space) {
+          const pose = xrFrame.getPose(space, refSpace);
+          if (pose) {
+            pos.set(
+              pose.transform.position.x,
+              pose.transform.position.y,
+              pose.transform.position.z
+            );
           }
-          // B or Y button (Index 5)
-          const buttonB = gamepad.buttons[5];
-          if (buttonB && buttonB.pressed) {
-            buttonBPressedThisFrame = true;
+        }
+      }
+      return pos;
+    };
+
+    let buttonAPressedThisFrame = false;
+    let buttonBPressedThisFrame = false;
+
+    const inputs = Array.from(session.inputSources);
+    inputs.forEach((inputSource: XRInputSource) => {
+      const gamepad = inputSource.gamepad;
+      if (!gamepad) return;
+
+      // A or X button (Index 4) — toggle color chart
+      const buttonA = gamepad.buttons[4];
+      if (buttonA && buttonA.pressed) buttonAPressedThisFrame = true;
+
+      // B or Y button (Index 5) — toggle video modal
+      const buttonB = gamepad.buttons[5];
+      if (buttonB && buttonB.pressed) buttonBPressedThisFrame = true;
+
+      // ── VR GRAB via Trigger (button 0) or Grip (button 1) ──────────────
+      if (gameState !== "playing" || isMixing) return;
+
+      const hand = inputSource.handedness as "left" | "right";
+      const trigger = gamepad.buttons[0]; // Trigger (index finger)
+      const grip = gamepad.buttons[1];    // Grip (middle finger)
+
+      const isPressed = (trigger && trigger.pressed) || (grip && grip.pressed);
+      const prevPressed = vrTriggerPrevState.current[hand] || vrGripPrevState.current[hand];
+
+      vrTriggerPrevState.current[hand] = !!(trigger && trigger.pressed);
+      vrGripPrevState.current[hand] = !!(grip && grip.pressed);
+
+      // ── GRAB: trigger pressed this frame (edge detection) ──────────────
+      if (isPressed && !prevPressed) {
+        const ctrlPos = getInputSourcePos(inputSource);
+
+        // Find closest non-placed sphere within grab radius
+        let closestId: string | null = null;
+        let closestDist = 0.18; // grab radius in meters
+        spheresRef.current.forEach((s) => {
+          if (s.status === "placed") return;
+          const sPos = new THREE.Vector3(...s.position);
+          const dist = ctrlPos.distanceTo(sPos);
+          if (dist < closestDist) {
+            closestDist = dist;
+            closestId = s.id;
+          }
+        });
+
+        if (closestId) {
+          audio.playGrab();
+          vrDraggedIdRef.current = closestId;
+          vrControllerHandRef.current = hand;
+          setDraggedId(closestId);
+
+          // Release from mixer if needed
+          if (mixerSlot1Ref.current && mixerSlot1Ref.current.id === closestId) setMixerSlot1(null);
+          if (mixerSlot2Ref.current && mixerSlot2Ref.current.id === closestId) setMixerSlot2(null);
+
+          setSpheres((prev) =>
+            prev.map((s) => (s.id === closestId ? { ...s, status: "table" } : s))
+          );
+        }
+      }
+
+      // ── MOVE: while holding, update sphere to follow controller ─────────
+      if (isPressed && vrDraggedIdRef.current && vrControllerHandRef.current === hand) {
+        const ctrlPos = getInputSourcePos(inputSource);
+        if (ctrlPos.lengthSq() > 0) {
+          const id = vrDraggedIdRef.current;
+          setSpheres((prev) =>
+            prev.map((s) =>
+              s.id === id
+                ? {
+                    ...s,
+                    position: [
+                      ctrlPos.x,
+                      Math.max(0.74, ctrlPos.y),
+                      THREE.MathUtils.clamp(ctrlPos.z, -1.3, -0.2),
+                    ] as [number, number, number],
+                  }
+                : s
+            )
+          );
+        }
+      }
+
+      // ── RELEASE: trigger released this frame ────────────────────────────
+      if (!isPressed && prevPressed && vrDraggedIdRef.current && vrControllerHandRef.current === hand) {
+        handlePointerUp();
+        vrDraggedIdRef.current = null;
+        vrControllerHandRef.current = null;
+      }
+    });
+
+    // ── JOYSTICK LOCOMOTION ─────────────────────────────────────────────────
+    if (isPresenting && xrOriginRef.current) {
+      const origin = xrOriginRef.current;
+      const camera = state.camera;
+      const delta = state.clock.getDelta ? state.clock.getDelta() : (1 / 60);
+
+      inputs.forEach((inputSource: XRInputSource) => {
+        const gp = inputSource.gamepad;
+        if (!gp) return;
+        const hand = inputSource.handedness;
+
+        if (hand === "left") {
+          // Left stick: axes[0] = X (strafe), axes[1] = Y (forward/back)
+          const stickX = gp.axes[2] ?? gp.axes[0] ?? 0; // some controllers use axes[2]
+          const stickY = gp.axes[3] ?? gp.axes[1] ?? 0; // some controllers use axes[3]
+          const deadzone = 0.15;
+          if (Math.abs(stickX) > deadzone || Math.abs(stickY) > deadzone) {
+            // Get camera forward/right projected onto the XZ plane
+            const forward = new THREE.Vector3();
+            const right = new THREE.Vector3();
+            camera.getWorldDirection(forward);
+            forward.y = 0;
+            forward.normalize();
+            right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+            const move = new THREE.Vector3();
+            move.addScaledVector(forward, -stickY * MOVE_SPEED * delta);
+            move.addScaledVector(right, stickX * MOVE_SPEED * delta);
+
+            // Clamp to scene bounds so player stays in the meadow
+            origin.position.x = THREE.MathUtils.clamp(origin.position.x + move.x, -8, 8);
+            origin.position.z = THREE.MathUtils.clamp(origin.position.z + move.z, -10, 3);
+          }
+        }
+
+        if (hand === "right") {
+          // Right stick: axes[2] = X for snap-turn
+          const stickX = gp.axes[2] ?? gp.axes[0] ?? 0;
+          const snapDeadzone = 0.6;
+          if (!snapTurnCooldown.current) {
+            if (stickX > snapDeadzone) {
+              // Snap right
+              origin.rotation.y -= SNAP_ANGLE;
+              snapTurnCooldown.current = true;
+            } else if (stickX < -snapDeadzone) {
+              // Snap left
+              origin.rotation.y += SNAP_ANGLE;
+              snapTurnCooldown.current = true;
+            }
+          }
+          // Reset cooldown when stick returns to center
+          if (Math.abs(stickX) < snapDeadzone * 0.5) {
+            snapTurnCooldown.current = false;
           }
         }
       });
-
-      // Detect button A press transition (press down)
-      if (buttonAPressedThisFrame && !buttonAPrevState.current) {
-        audio.playClick();
-        setShowColorChart((prev) => !prev);
-      }
-      buttonAPrevState.current = buttonAPressedThisFrame;
-
-      // Detect button B press transition (press down)
-      if (buttonBPressedThisFrame && !buttonBPrevState.current) {
-        audio.playClick();
-        setShowVideoModal((prev) => !prev);
-      }
-      buttonBPrevState.current = buttonBPressedThisFrame;
     }
+
+    // Detect button A press transition
+    if (buttonAPressedThisFrame && !buttonAPrevState.current) {
+      audio.playClick();
+      setShowColorChart((prev) => !prev);
+    }
+    buttonAPrevState.current = buttonAPressedThisFrame;
+
+    // Detect button B press transition
+    if (buttonBPressedThisFrame && !buttonBPrevState.current) {
+      audio.playClick();
+      setShowVideoModal((prev) => !prev);
+    }
+    buttonBPrevState.current = buttonBPressedThisFrame;
   });
 
   // Active spheres on the table/mixer
   const [spheres, setSpheres] = useState<SphereState[]>([]);
+  const spheresRef = useRef<SphereState[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
   
   // Mixer states
   const [mixerSlot1, setMixerSlot1] = useState<SphereState | null>(null);
   const [mixerSlot2, setMixerSlot2] = useState<SphereState | null>(null);
+  const mixerSlot1Ref = useRef<SphereState | null>(null);
+  const mixerSlot2Ref = useRef<SphereState | null>(null);
   const [isMixing, setIsMixing] = useState(false);
+  const isMixingRef = useRef(false);
 
-  // Video element for VR Video Tutorial
-  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  // Keep refs in sync so useFrame closures can access latest state without re-render issues
+  useEffect(() => { spheresRef.current = spheres; }, [spheres]);
+  useEffect(() => { mixerSlot1Ref.current = mixerSlot1; }, [mixerSlot1]);
+  useEffect(() => { mixerSlot2Ref.current = mixerSlot2; }, [mixerSlot2]);
+  useEffect(() => { isMixingRef.current = isMixing; }, [isMixing]);
+
+  // Animated canvas texture for VR Video Tutorial (avoids CORS issues with external video URLs)
+  const [videoCanvasTexture, setVideoCanvasTexture] = useState<THREE.CanvasTexture | null>(null);
+  const videoCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoAnimFrameRef = useRef<number>(0);
+  const videoPlayingRef = useRef(false);
   const [videoPlaying, setVideoPlaying] = useState(false);
 
+  // Build canvas texture once
   useEffect(() => {
-    if (typeof window !== "undefined") {
-      const vid = document.createElement("video");
-      vid.src = "https://assets.mixkit.co/videos/preview/mixkit-paint-swirling-in-water-43118-large.mp4";
-      vid.crossOrigin = "anonymous";
-      vid.loop = true;
-      vid.muted = true;
-      vid.playsInline = true;
-      setVideoElement(vid);
-    }
+    if (typeof window === "undefined") return;
+    const canvas = document.createElement("canvas");
+    canvas.width = 512;
+    canvas.height = 288;
+    videoCanvasRef.current = canvas;
+    const tex = new THREE.CanvasTexture(canvas);
+    setVideoCanvasTexture(tex);
+    // Initial paint
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#0f172a";
+    ctx.fillRect(0, 0, 512, 288);
+    return () => { cancelAnimationFrame(videoAnimFrameRef.current); };
   }, []);
 
+  // Animate the canvas when video modal is open
   useEffect(() => {
-    if (videoElement) {
-      if (showVideoModal) {
-        videoElement.play()
-          .then(() => setVideoPlaying(true))
-          .catch((err) => console.log("Video autoplay failed:", err));
-      } else {
-        videoElement.pause();
-        setVideoPlaying(false);
+    if (!videoCanvasRef.current || !videoCanvasTexture) return;
+    const canvas = videoCanvasRef.current;
+    const ctx = canvas.getContext("2d")!;
+    let t = 0;
+
+    const paint = () => {
+      if (!videoPlayingRef.current) return;
+      t += 0.012;
+      // Swirling paint animation
+      ctx.fillStyle = `hsl(${(t * 30) % 360}, 70%, 8%)`;
+      ctx.fillRect(0, 0, 512, 288);
+      for (let i = 0; i < 6; i++) {
+        const hue = (t * 60 + i * 60) % 360;
+        const x = 256 + Math.sin(t + i * 1.05) * 160;
+        const y = 144 + Math.cos(t * 0.7 + i * 0.9) * 90;
+        const r = 60 + Math.sin(t * 0.5 + i) * 30;
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, `hsla(${hue}, 90%, 70%, 0.8)`);
+        grad.addColorStop(1, `hsla(${hue}, 90%, 30%, 0)`);
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = grad;
+        ctx.fill();
       }
+      // Title overlay
+      ctx.fillStyle = "rgba(0,0,0,0.45)";
+      ctx.fillRect(0, 220, 512, 68);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 20px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("HƯỚNG DẪN PHA MÀU SẮC", 256, 252);
+      ctx.font = "14px Arial";
+      ctx.fillStyle = "#94a3b8";
+      ctx.fillText("Dùng Controller Trigger / Grip để nhặt bóng", 256, 275);
+      videoCanvasTexture.needsUpdate = true;
+      videoAnimFrameRef.current = requestAnimationFrame(paint);
+    };
+
+    if (showVideoModal) {
+      videoPlayingRef.current = true;
+      setVideoPlaying(true);
+      paint();
+    } else {
+      videoPlayingRef.current = false;
+      setVideoPlaying(false);
+      cancelAnimationFrame(videoAnimFrameRef.current);
+      // Draw pause screen
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, 512, 288);
+      ctx.fillStyle = "#475569";
+      ctx.font = "bold 24px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("▶  Nhấn để xem hướng dẫn", 256, 144);
+      videoCanvasTexture.needsUpdate = true;
     }
-  }, [showVideoModal, videoElement]);
+    return () => { cancelAnimationFrame(videoAnimFrameRef.current); };
+  }, [showVideoModal, videoCanvasTexture]);
 
   const toggleVideoPlay = () => {
-    if (!videoElement) return;
-    if (videoPlaying) {
-      videoElement.pause();
+    if (!videoCanvasRef.current || !videoCanvasTexture) return;
+    const canvas = videoCanvasRef.current;
+    const ctx = canvas.getContext("2d")!;
+    if (videoPlayingRef.current) {
+      videoPlayingRef.current = false;
       setVideoPlaying(false);
+      cancelAnimationFrame(videoAnimFrameRef.current);
+      ctx.fillStyle = "#0f172a";
+      ctx.fillRect(0, 0, 512, 288);
+      ctx.fillStyle = "#475569";
+      ctx.font = "bold 24px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("⏸  Đã tạm dừng", 256, 144);
+      videoCanvasTexture.needsUpdate = true;
     } else {
-      videoElement.play()
-        .then(() => setVideoPlaying(true))
-        .catch((err) => console.log("Video play failed:", err));
+      // restart animation loop
+      setShowVideoModal(true); // triggers the useEffect above
     }
   };
 
@@ -574,7 +812,7 @@ export default function VRScene() {
   return (
     <>
       <color attach="background" args={["#7dd3fc"]} />
-      <XROrigin position={[0, 0, 0.6]} />
+      <XROrigin ref={xrOriginRef} position={[0, 0, 0.6]} />
       {/* Volumetric sky-blue meadow fog */}
       <fog attach="fog" args={["#bae6fd", 8, 22]} />
 
@@ -1156,13 +1394,11 @@ export default function VRScene() {
               <boxGeometry args={[0.38, 0.24, 0.01]} />
               <meshStandardMaterial color="#1e293b" roughness={0.3} />
             </mesh>
-            {/* Screen Video Surface */}
-            {videoElement ? (
+            {/* Screen: Animated canvas texture (CORS-safe, works in WebXR) */}
+            {videoCanvasTexture ? (
               <mesh position={[0, 0, 0.006]}>
                 <planeGeometry args={[0.36, 0.22]} />
-                <meshBasicMaterial toneMapped={false}>
-                  <videoTexture attach="map" args={[videoElement]} />
-                </meshBasicMaterial>
+                <meshBasicMaterial map={videoCanvasTexture} toneMapped={false} />
               </mesh>
             ) : (
               <Text
@@ -1173,7 +1409,7 @@ export default function VRScene() {
                 anchorY="middle"
                 font="/Outfit-Regular.ttf"
               >
-                Đang tải video...
+                Đang khởi tạo...
               </Text>
             )}
             {/* Play/Pause indicator */}
@@ -1185,7 +1421,7 @@ export default function VRScene() {
               anchorY="middle"
               font="/Outfit-Regular.ttf"
             >
-              {videoPlaying ? "⏸ VIDEO ĐANG PHÁT" : "▶ VIDEO ĐÃ TẠM DỪNG"}
+              {videoPlaying ? "⏸ HOẠT CẢNH ĐANG CHẠY" : "▶ NHẤN ĐỂ PHÁT"}
             </Text>
           </group>
 

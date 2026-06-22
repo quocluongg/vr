@@ -9,10 +9,10 @@ import VRScene from "./VRScene";
 import * as THREE from "three";
 
 export default function VRCanvas() {
-  const { gameState } = useGame();
+  const { gameState, isVRActive } = useGame();
 
-  // Show 3D scene both during play and in the background of the main menu
-  if (gameState !== "playing" && gameState !== "menu") return null;
+  // Render canvas: during play & menu, OR whenever VR is active (so 3D victory/gameover screens show in headset)
+  if (gameState !== "playing" && gameState !== "menu" && !isVRActive) return null;
 
   return (
     <div className="fixed inset-0 w-full h-full z-0 bg-slate-950">
