@@ -74,7 +74,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [gameState, setGameState] = useState<GameState>("menu");
   const [isVRActive, setIsVRActive] = useState<boolean>(false);
   const [score, setScore] = useState<number>(0);
-  const [timeLeft, setTimeLeft] = useState<number>(120);
+  const [timeLeft, setTimeLeft] = useState<number>(500);
   const [isColorBlindMode, setIsColorBlindMode] = useState<boolean>(false);
   const [soundOn, setSoundOn] = useState<boolean>(true);
   const [placedColors, setPlacedColors] = useState<Record<string, string>>({});
@@ -93,7 +93,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setLevelState(lvl);
     setPlacedColors({});
     if (gameMode === "hard") {
-      setTimeLeft(lvl === 1 ? 60 : lvl === 2 ? 100 : 150);
+      setTimeLeft(500);
     }
   };
 
@@ -139,7 +139,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const resetLevel = () => {
     setPlacedColors({});
     if (gameMode === "hard") {
-      setTimeLeft(level === 1 ? 60 : level === 2 ? 100 : 150);
+      setTimeLeft(500);
     }
     setGameState("playing");
   };
@@ -162,7 +162,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setGameState("menu");
     setIsVRActive(false);
     if (gameMode === "hard") {
-      setTimeLeft(60);
+      setTimeLeft(500);
     }
   };
 
