@@ -48,8 +48,11 @@ interface SphereState {
 export default function VRScene() {
   const {
     level,
+    setLevel,
     gameMode,
+    setGameMode,
     gameState,
+    setGameState,
     isVRActive,
     placedColors,
     placeColor,
@@ -59,7 +62,11 @@ export default function VRScene() {
     nextLevel,
     resetGame,
     isColorBlindMode,
+    setIsColorBlindMode,
     setIsVRActive,
+    soundOn,
+    setSoundOn,
+    score,
     showVideoModal,
     setShowVideoModal,
     showColorChart,
@@ -124,6 +131,47 @@ export default function VRScene() {
   const [mixerSlot1, setMixerSlot1] = useState<SphereState | null>(null);
   const [mixerSlot2, setMixerSlot2] = useState<SphereState | null>(null);
   const [isMixing, setIsMixing] = useState(false);
+
+  // Video element for VR Video Tutorial
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  const [videoPlaying, setVideoPlaying] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const vid = document.createElement("video");
+      vid.src = "https://assets.mixkit.co/videos/preview/mixkit-paint-swirling-in-water-43118-large.mp4";
+      vid.crossOrigin = "anonymous";
+      vid.loop = true;
+      vid.muted = true;
+      vid.playsInline = true;
+      setVideoElement(vid);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (videoElement) {
+      if (showVideoModal) {
+        videoElement.play()
+          .then(() => setVideoPlaying(true))
+          .catch((err) => console.log("Video autoplay failed:", err));
+      } else {
+        videoElement.pause();
+        setVideoPlaying(false);
+      }
+    }
+  }, [showVideoModal, videoElement]);
+
+  const toggleVideoPlay = () => {
+    if (!videoElement) return;
+    if (videoPlaying) {
+      videoElement.pause();
+      setVideoPlaying(false);
+    } else {
+      videoElement.play()
+        .then(() => setVideoPlaying(true))
+        .catch((err) => console.log("Video play failed:", err));
+    }
+  };
 
   // Dispensers positions
   const DISPENSERS = [
@@ -1059,7 +1107,529 @@ export default function VRScene() {
           </group>
         </group>
       )}
+
+      {/* Floating 3D VR Video Tutorial Board */}
+      {showVideoModal && (
+        <group position={[0, 1.25, -0.42]}>
+          {/* Main Panel Background */}
+          <mesh castShadow>
+            <boxGeometry args={[0.8, 0.55, 0.015]} />
+            <meshStandardMaterial
+              color="#0f172a"
+              transparent
+              opacity={0.85}
+              roughness={0.15}
+              metalness={0.8}
+            />
+          </mesh>
+          {/* Border Frame */}
+          <mesh>
+            <boxGeometry args={[0.81, 0.56, 0.016]} />
+            <meshStandardMaterial
+              color="#ec4899"
+              transparent
+              opacity={0.3}
+              roughness={0.2}
+              emissive="#ec4899"
+              emissiveIntensity={0.6}
+              wireframe
+            />
+          </mesh>
+
+          {/* Title */}
+          <Text
+            position={[0, 0.22, 0.01]}
+            fontSize={0.024}
+            color="#fdf2f8"
+            fontWeight="bold"
+            anchorX="center"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            HƯỚNG DẪN HỌC MÀU SẮC & CÁCH CHƠI
+          </Text>
+
+          {/* Left Side: Video Player Screen */}
+          <group position={[-0.18, -0.02, 0.01]}>
+            {/* Screen Frame */}
+            <mesh castShadow>
+              <boxGeometry args={[0.38, 0.24, 0.01]} />
+              <meshStandardMaterial color="#1e293b" roughness={0.3} />
+            </mesh>
+            {/* Screen Video Surface */}
+            {videoElement ? (
+              <mesh position={[0, 0, 0.006]}>
+                <planeGeometry args={[0.36, 0.22]} />
+                <meshBasicMaterial toneMapped={false}>
+                  <videoTexture attach="map" args={[videoElement]} />
+                </meshBasicMaterial>
+              </mesh>
+            ) : (
+              <Text
+                position={[0, 0, 0.006]}
+                fontSize={0.012}
+                color="#64748b"
+                anchorX="center"
+                anchorY="middle"
+                font="/Outfit-Regular.ttf"
+              >
+                Đang tải video...
+              </Text>
+            )}
+            {/* Play/Pause indicator */}
+            <Text
+              position={[0, -0.14, 0.005]}
+              fontSize={0.01}
+              color="#94a3b8"
+              anchorX="center"
+              anchorY="middle"
+              font="/Outfit-Regular.ttf"
+            >
+              {videoPlaying ? "⏸ VIDEO ĐANG PHÁT" : "▶ VIDEO ĐÃ TẠM DỪNG"}
+            </Text>
+          </group>
+
+          {/* Right Side: Text Instructions */}
+          <group position={[0.05, 0.12, 0.01]}>
+            {[
+              "🎨 CẤP ĐỘ MÀU SẮC:",
+              "• Màu cơ bản: Đỏ, Vàng, Lam",
+              "• Màu thứ cấp: Cam, Lục, Tím",
+              "  (Tạo bằng cách trộn 2 màu cơ bản)",
+              "• Màu bậc ba: Đỏ-Cam, Vàng-Lục...",
+              "  (Trộn 1 màu cơ bản + 1 màu thứ cấp)",
+              "",
+              "🎮 CÁCH TƯƠNG TÁC:",
+              "• Controller: Hướng tia laser, nhấn giữ",
+              "  nút Trigger (Cò) hoặc Grip để nhặt bóng.",
+              "• Hand Tracking: Pinch (ngón cái + trỏ)",
+              "  để nhặt bóng màu và thả vào giỏ.",
+            ].map((text, idx) => {
+              const isHeader = text.startsWith("🎨") || text.startsWith("🎮");
+              return (
+                <Text
+                  key={idx}
+                  position={[0, -idx * 0.02, 0]}
+                  fontSize={isHeader ? 0.011 : 0.009}
+                  color={isHeader ? "#ec4899" : "#f1f5f9"}
+                  fontWeight={isHeader ? "bold" : "normal"}
+                  anchorX="left"
+                  anchorY="middle"
+                  font="/Outfit-Regular.ttf"
+                >
+                  {text}
+                </Text>
+              );
+            })}
+          </group>
+
+          {/* Control Buttons */}
+          <VRButton
+            position={[-0.2, -0.2, 0.01]}
+            width={0.16}
+            height={0.045}
+            text={videoPlaying ? "TẠM DỪNG" : "PHÁT VIDEO"}
+            color="#475569"
+            hoverColor="#334155"
+            onClick={toggleVideoPlay}
+          />
+          <VRButton
+            position={[0.2, -0.2, 0.01]}
+            width={0.16}
+            height={0.045}
+            text="ĐÓNG HƯỚNG DẪN"
+            color="#ec4899"
+            hoverColor="#db2777"
+            onClick={() => setShowVideoModal(false)}
+          />
+        </group>
+      )}
+
+      {/* Floating 3D VR Main Menu */}
+      {gameState === "menu" && (
+        <group position={[0, 1.25, -0.5]}>
+          {/* Main Panel Background */}
+          <mesh castShadow>
+            <boxGeometry args={[0.8, 0.62, 0.015]} />
+            <meshStandardMaterial
+              color="#0f172a"
+              transparent
+              opacity={0.85}
+              roughness={0.15}
+              metalness={0.8}
+            />
+          </mesh>
+          {/* Border Frame */}
+          <mesh>
+            <boxGeometry args={[0.81, 0.63, 0.016]} />
+            <meshStandardMaterial
+              color="#06b6d4"
+              transparent
+              opacity={0.3}
+              roughness={0.2}
+              emissive="#06b6d4"
+              emissiveIntensity={0.6}
+              wireframe
+            />
+          </mesh>
+
+          {/* Title */}
+          <Text
+            position={[0, 0.24, 0.01]}
+            fontSize={0.035}
+            color="#06b6d4"
+            fontWeight="bold"
+            anchorX="center"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            VR COLOR CIRCLE
+          </Text>
+          <Text
+            position={[0, 0.2, 0.01]}
+            fontSize={0.015}
+            color="#94a3b8"
+            anchorX="center"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            PHÒNG THÍ NGHIỆM MÀU SẮC 3D
+          </Text>
+
+          {/* SECTION 1: LEVEL */}
+          <Text
+            position={[-0.35, 0.12, 0.01]}
+            fontSize={0.014}
+            color="#94a3b8"
+            fontWeight="bold"
+            anchorX="left"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            1. CHỌN CẤP ĐỘ (LEVEL)
+          </Text>
+          <VRButton
+            position={[-0.22, 0.06, 0.01]}
+            width={0.18}
+            height={0.045}
+            text="Lớp 1"
+            isActive={level === 1}
+            activeColor="#06b6d4"
+            onClick={() => setLevel(1)}
+          />
+          <VRButton
+            position={[0, 0.06, 0.01]}
+            width={0.18}
+            height={0.045}
+            text="Lớp 2"
+            isActive={level === 2}
+            activeColor="#06b6d4"
+            onClick={() => setLevel(2)}
+          />
+          <VRButton
+            position={[0.22, 0.06, 0.01]}
+            width={0.18}
+            height={0.045}
+            text="Lớp 3"
+            isActive={level === 3}
+            activeColor="#06b6d4"
+            onClick={() => setLevel(3)}
+          />
+
+          {/* SECTION 2: MODE */}
+          <Text
+            position={[-0.35, -0.01, 0.01]}
+            fontSize={0.014}
+            color="#94a3b8"
+            fontWeight="bold"
+            anchorX="left"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            2. CHẾ ĐỘ CHƠI (MODE)
+          </Text>
+          <VRButton
+            position={[-0.15, -0.07, 0.01]}
+            width={0.25}
+            height={0.05}
+            text="Dễ (Easy)"
+            isActive={gameMode === "easy"}
+            activeColor="#8b5cf6"
+            onClick={() => setGameMode("easy")}
+          />
+          <VRButton
+            position={[0.15, -0.07, 0.01]}
+            width={0.25}
+            height={0.05}
+            text="Khó (Hard)"
+            isActive={gameMode === "hard"}
+            activeColor="#f43f5e"
+            onClick={() => setGameMode("hard")}
+          />
+
+          {/* SECTION 3: OPTIONS */}
+          <Text
+            position={[-0.35, -0.14, 0.01]}
+            fontSize={0.014}
+            color="#94a3b8"
+            fontWeight="bold"
+            anchorX="left"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            3. HỖ TRỢ NGƯỜI CHƠI
+          </Text>
+          <VRButton
+            position={[-0.15, -0.19, 0.01]}
+            width={0.25}
+            height={0.045}
+            text={isColorBlindMode ? "Mù màu: BẬT" : "Mù màu: TẮT"}
+            isActive={isColorBlindMode}
+            activeColor="#f59e0b"
+            onClick={() => setIsColorBlindMode(!isColorBlindMode)}
+          />
+          <VRButton
+            position={[0.15, -0.19, 0.01]}
+            width={0.25}
+            height={0.045}
+            text={soundOn ? "Âm thanh: BẬT" : "Âm thanh: TẮT"}
+            isActive={soundOn}
+            activeColor="#10b981"
+            onClick={() => setSoundOn(!soundOn)}
+          />
+
+          {/* SECTION 4: ACTIONS */}
+          <VRButton
+            position={[-0.22, -0.265, 0.01]}
+            width={0.22}
+            height={0.055}
+            text="BẮT ĐẦU CHƠI"
+            color="#10b981"
+            hoverColor="#059669"
+            onClick={() => {
+              audio.startBGM();
+              setGameState("playing");
+            }}
+          />
+          <VRButton
+            position={[0, -0.265, 0.01]}
+            width={0.18}
+            height={0.055}
+            text="HỌC MÀU SẮC"
+            color="#ec4899"
+            hoverColor="#db2777"
+            onClick={() => setShowVideoModal(true)}
+          />
+          <VRButton
+            position={[0.22, -0.265, 0.01]}
+            width={0.18}
+            height={0.055}
+            text="BẢNG PHA MÀU"
+            color="#eab308"
+            hoverColor="#ca8a04"
+            onClick={() => setShowColorChart(true)}
+          />
+        </group>
+      )}
+
+      {/* Floating 3D VR Victory / Game Over Screen */}
+      {(gameState === "victory" || gameState === "gameover") && (
+        <group position={[0, 1.25, -0.5]}>
+          {/* Main Panel Background */}
+          <mesh castShadow>
+            <boxGeometry args={[0.6, 0.42, 0.015]} />
+            <meshStandardMaterial
+              color="#0f172a"
+              transparent
+              opacity={0.9}
+              roughness={0.15}
+              metalness={0.8}
+            />
+          </mesh>
+          {/* Border Frame */}
+          <mesh>
+            <boxGeometry args={[0.61, 0.43, 0.016]} />
+            <meshStandardMaterial
+              color={gameState === "victory" ? "#10b981" : "#ef4444"}
+              transparent
+              opacity={0.3}
+              roughness={0.2}
+              emissive={gameState === "victory" ? "#10b981" : "#ef4444"}
+              emissiveIntensity={0.6}
+              wireframe
+            />
+          </mesh>
+
+          {/* Title */}
+          <Text
+            position={[0, 0.14, 0.01]}
+            fontSize={0.028}
+            color={gameState === "victory" ? "#10b981" : "#ef4444"}
+            fontWeight="bold"
+            anchorX="center"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            {gameState === "victory" ? "THÍ NGHIỆM THÀNH CÔNG!" : "HẾT THỜI GIAN!"}
+          </Text>
+
+          {/* Subtext */}
+          <Text
+            position={[0, 0.07, 0.01]}
+            fontSize={0.012}
+            color="#94a3b8"
+            maxWidth={0.5}
+            anchorX="center"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            {gameState === "victory"
+              ? "Bạn đã xuất sắc phân loại chính xác toàn bộ màu sắc trong phòng thí nghiệm!"
+              : "Thời gian đã hết! Hãy thử sức lại để rèn luyện kỹ năng phối màu."}
+          </Text>
+
+          {/* Stats Box */}
+          <group position={[0, -0.04, 0.01]}>
+            <mesh>
+              <boxGeometry args={[0.4, 0.08, 0.005]} />
+              <meshStandardMaterial color="#020617" roughness={0.5} />
+            </mesh>
+            <Text
+              position={[-0.1, 0.01, 0.005]}
+              fontSize={0.01}
+              color="#64748b"
+              anchorX="center"
+              anchorY="middle"
+              font="/Outfit-Regular.ttf"
+            >
+              CẤP ĐỘ ĐẠT ĐƯỢC
+            </Text>
+            <Text
+              position={[-0.1, -0.015, 0.005]}
+              fontSize={0.014}
+              color="#f1f5f9"
+              fontWeight="bold"
+              anchorX="center"
+              anchorY="middle"
+              font="/Outfit-Regular.ttf"
+            >
+              Lớp {level}/3
+            </Text>
+
+            <Text
+              position={[0.1, 0.01, 0.005]}
+              fontSize={0.01}
+              color="#64748b"
+              anchorX="center"
+              anchorY="middle"
+              font="/Outfit-Regular.ttf"
+            >
+              TỔNG ĐIỂM SỐ
+            </Text>
+            <Text
+              position={[0.1, -0.015, 0.005]}
+              fontSize={0.018}
+              color="#fbbf24"
+              fontWeight="bold"
+              anchorX="center"
+              anchorY="middle"
+              font="/Outfit-Regular.ttf"
+            >
+              {score}
+            </Text>
+          </group>
+
+          {/* Action button */}
+          <VRButton
+            position={[0, -0.13, 0.01]}
+            width={0.3}
+            height={0.05}
+            text="QUAY LẠI PHÒNG CHỜ"
+            color={gameState === "victory" ? "#10b981" : "#ef4444"}
+            hoverColor={gameState === "victory" ? "#059669" : "#dc2626"}
+            onClick={() => {
+              resetGame();
+            }}
+          />
+        </group>
+      )}
     </>
+  );
+}
+
+interface VRButtonProps {
+  position: [number, number, number];
+  width: number;
+  height: number;
+  text: string;
+  color?: string;
+  hoverColor?: string;
+  textColor?: string;
+  onClick: () => void;
+  disabled?: boolean;
+  isActive?: boolean;
+  activeColor?: string;
+}
+
+function VRButton({
+  position,
+  width,
+  height,
+  text,
+  color = "#1e293b",
+  hoverColor = "#334155",
+  textColor = "#ffffff",
+  onClick,
+  disabled = false,
+  isActive = false,
+  activeColor = "#06b6d4",
+}: VRButtonProps) {
+  const [hovered, setHovered] = useState(false);
+
+  return (
+    <group
+      position={position}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) {
+          audio.playClick();
+          onClick();
+        }
+      }}
+      onPointerOver={(e) => {
+        e.stopPropagation();
+        if (!disabled) setHovered(true);
+      }}
+      onPointerOut={(e) => {
+        e.stopPropagation();
+        if (!disabled) setHovered(false);
+      }}
+      scale={hovered ? 1.05 : 1.0}
+    >
+      {/* Background Plate */}
+      <mesh castShadow>
+        <boxGeometry args={[width, height, 0.015]} />
+        <meshStandardMaterial
+          color={disabled ? "#475569" : isActive ? activeColor : hovered ? hoverColor : color}
+          emissive={isActive ? activeColor : "#000000"}
+          emissiveIntensity={isActive ? 0.2 : 0}
+          roughness={0.2}
+          metalness={0.5}
+        />
+      </mesh>
+      {/* Text */}
+      <Text
+        position={[0, 0, 0.01]}
+        fontSize={height * 0.35}
+        color={disabled ? "#94a3b8" : isActive ? "#0f172a" : textColor}
+        fontWeight="bold"
+        anchorX="center"
+        anchorY="middle"
+        font="/Outfit-Regular.ttf"
+      >
+        {text}
+      </Text>
+    </group>
   );
 }
 

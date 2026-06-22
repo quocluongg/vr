@@ -147,7 +147,7 @@ export default function Dashboard() {
           <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-800 bg-slate-950 shadow-inner">
             <iframe
               className="absolute inset-0 w-full h-full"
-              src="https://www.youtube.com/embed/tZh7A5wdfjA?autoplay=1"
+              src="https://www.youtube.com/embed/tZh7A5wdfjA?autoplay=1&mute=1"
               title="Color Theory for Beginners"
               frameBorder="0"
               allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -316,6 +316,23 @@ export default function Dashboard() {
       </div>
     </div>
   );
+
+  // Render overlay during VR Active (WebXR session) - standard HUD is shown in 3D, so keep DOM light
+  if (isVRActive) {
+    return (
+      <div className="absolute inset-0 pointer-events-none z-10">
+        <div className="absolute top-4 left-4 z-50 pointer-events-auto">
+          <button
+            onClick={() => { audio.playClick(); resetGame(); }}
+            className="px-3 py-1.5 rounded-lg border border-rose-500/40 bg-rose-950/60 text-rose-300 text-xs font-semibold hover:bg-rose-900 transition-all shadow-md flex items-center gap-1"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Thoát VR Mode
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // Render main menu
   if (gameState === "menu") {
@@ -633,26 +650,7 @@ export default function Dashboard() {
     );
   }
 
-  // Render overlay during VR Active (WebXR session) - standard HUD is shown in 3D, so keep DOM light
-  if (gameState === "playing" && isVRActive) {
-    return (
-      <div className="absolute inset-0 pointer-events-none z-10">
-        <div className="absolute top-4 left-4 z-50 pointer-events-auto">
-          <button
-            onClick={() => { audio.playClick(); resetGame(); }}
-            className="px-3 py-1.5 rounded-lg border border-rose-500/40 bg-rose-950/60 text-rose-300 text-xs font-semibold hover:bg-rose-900 transition-all shadow-md flex items-center gap-1"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            Thoát VR Mode
-          </button>
-        </div>
-        {/* Render Video Modal */}
-        {showVideoModal && renderVideoModal()}
-        {/* Render Color Chart Modal */}
-        {showColorChart && renderColorChartModal()}
-      </div>
-    );
-  }
+  // VR Active overlay is handled globally above
 
   // Render Victory or Game Over Screens
   if (gameState === "victory" || gameState === "gameover") {
