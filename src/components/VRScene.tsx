@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { useFrame } from "@react-three/fiber";
-import { OrbitControls, Stars, Text, Cylinder, Sparkles } from "@react-three/drei";
+import { useFrame, useThree } from "@react-three/fiber";
+import { OrbitControls, Stars, Text, Cylinder, Sparkles, Billboard } from "@react-three/drei";
 import { useGame, ALL_COLORS, ColorData } from "@/context/GameContext";
 import { audio } from "@/utils/audio";
 import { useXR, XROrigin } from "@react-three/xr";
@@ -59,15 +59,62 @@ export default function VRScene() {
     nextLevel,
     resetGame,
     isColorBlindMode,
-    setIsVRActive
+    setIsVRActive,
+    showVideoModal,
+    setShowVideoModal,
+    showColorChart,
+    setShowColorChart
   } = useGame();
 
+  const { gl } = useThree();
 
-  const isPresenting = useXR((state) => !!state.session);
+  const session = useXR((state) => state.session);
+  const isPresenting = !!session;
 
   useEffect(() => {
     setIsVRActive(isPresenting);
   }, [isPresenting, setIsVRActive]);
+
+  // Track controller buttons A/X and B/Y state
+  const buttonAPrevState = useRef(false);
+  const buttonBPrevState = useRef(false);
+
+  useFrame(() => {
+    if (session) {
+      let buttonAPressedThisFrame = false;
+      let buttonBPressedThisFrame = false;
+      const inputs = Array.from(session.inputSources);
+      inputs.forEach((inputSource) => {
+        const gamepad = inputSource.gamepad;
+        if (gamepad) {
+          // A or X button (Index 4)
+          const buttonA = gamepad.buttons[4];
+          if (buttonA && buttonA.pressed) {
+            buttonAPressedThisFrame = true;
+          }
+          // B or Y button (Index 5)
+          const buttonB = gamepad.buttons[5];
+          if (buttonB && buttonB.pressed) {
+            buttonBPressedThisFrame = true;
+          }
+        }
+      });
+
+      // Detect button A press transition (press down)
+      if (buttonAPressedThisFrame && !buttonAPrevState.current) {
+        audio.playClick();
+        setShowColorChart((prev) => !prev);
+      }
+      buttonAPrevState.current = buttonAPressedThisFrame;
+
+      // Detect button B press transition (press down)
+      if (buttonBPressedThisFrame && !buttonBPrevState.current) {
+        audio.playClick();
+        setShowVideoModal((prev) => !prev);
+      }
+      buttonBPrevState.current = buttonBPressedThisFrame;
+    }
+  });
 
   // Active spheres on the table/mixer
   const [spheres, setSpheres] = useState<SphereState[]>([]);
@@ -80,9 +127,9 @@ export default function VRScene() {
 
   // Dispensers positions
   const DISPENSERS = [
-    { colorId: "red", hex: "#EF4444", pos: [-0.18, 0.77, -0.48] },
+    { colorId: "red", hex: "#EF4444", pos: [-0.16, 0.77, -0.48] },
     { colorId: "yellow", hex: "#FBBF24", pos: [0.0, 0.77, -0.48] },
-    { colorId: "blue", hex: "#3B82F6", pos: [0.18, 0.77, -0.48] },
+    { colorId: "blue", hex: "#3B82F6", pos: [0.16, 0.77, -0.48] },
   ];
 
   // Clear color is set in VRCanvas onCreated — do not set here to avoid overriding XR framebuffer setup
@@ -128,8 +175,8 @@ export default function VRScene() {
             colorId: col.id,
             hex: col.hex,
             symbol: col.symbol,
-            position: [-0.2 + index * 0.2, 0.77, -0.32] as [number, number, number],
-            spawnPosition: [-0.2 + index * 0.2, 0.77, -0.32] as [number, number, number],
+            position: [-0.16 + index * 0.16, 0.77, -0.38] as [number, number, number],
+            spawnPosition: [-0.16 + index * 0.16, 0.77, -0.38] as [number, number, number],
             status: "table",
             isPrimary: false,
           });
@@ -144,8 +191,8 @@ export default function VRScene() {
             colorId: col.id,
             hex: col.hex,
             symbol: col.symbol,
-            position: [-0.25 + (index % 6) * 0.1, 0.77, -0.22 - Math.floor(index / 6) * 0.08] as [number, number, number],
-            spawnPosition: [-0.25 + (index % 6) * 0.1, 0.77, -0.22 - Math.floor(index / 6) * 0.08] as [number, number, number],
+            position: [-0.25 + index * 0.1, 0.77, -0.32] as [number, number, number],
+            spawnPosition: [-0.25 + index * 0.1, 0.77, -0.32] as [number, number, number],
             status: "table",
             isPrimary: false,
           });
@@ -159,16 +206,41 @@ export default function VRScene() {
   // Get basket positions dynamically based on level (hung on the wooden rack at the back of the table)
   const getSlotPosition = (index: number, totalSlots: number) => {
     if (totalSlots === 3) {
-      const x = -0.2 + index * 0.2;
-      return new THREE.Vector3(x, 0.95, -0.7);
-    } else {
+      // Level 1: 3 columns, 1 row
+      const x = -0.22 + index * 0.22;
+      return new THREE.Vector3(x, 0.92, -0.7);
+    } else if (totalSlots === 6) {
+      // Level 2: 3 columns, 2 rows
       const row = Math.floor(index / 3);
       const col = index % 3;
-      const x = -0.2 + col * 0.2;
-      const y = 1.05 - row * 0.18;
+      const x = -0.22 + col * 0.22;
+      const y = 1.02 - row * 0.14;
+      return new THREE.Vector3(x, y, -0.7);
+    } else {
+      // Level 3: 4 columns, 3 rows
+      const row = Math.floor(index / 4);
+      const col = index % 4;
+      const x = -0.3 + col * 0.2;
+      const y = 1.03 - row * 0.125;
       return new THREE.Vector3(x, y, -0.7);
     }
   };
+
+  // Global event listener to release grabbed spheres on pointerup/touchend
+  useEffect(() => {
+    const handleGlobalUp = (e: PointerEvent | TouchEvent) => {
+      if (draggedId) {
+        handlePointerUp(e);
+      }
+    };
+    const dom = gl.domElement;
+    dom.addEventListener("pointerup", handleGlobalUp);
+    dom.addEventListener("touchend", handleGlobalUp);
+    return () => {
+      dom.removeEventListener("pointerup", handleGlobalUp);
+      dom.removeEventListener("touchend", handleGlobalUp);
+    };
+  }, [gl, draggedId]);
 
   // Drag handlers
   const handlePointerDown = (id: string, e: any) => {
@@ -178,6 +250,15 @@ export default function VRScene() {
     // Check if the sphere is already placed
     const sphere = spheres.find((s) => s.id === id);
     if (sphere && sphere.status === "placed") return;
+
+    // Capture the pointer on the clicked element to prevent losing events when drag speeds are high
+    if (e.target && typeof e.target.setPointerCapture === "function") {
+      try {
+        e.target.setPointerCapture(e.pointerId);
+      } catch (err) {
+        console.warn("Failed to set pointer capture:", err);
+      }
+    }
 
     audio.playGrab();
     setDraggedId(id);
@@ -191,17 +272,26 @@ export default function VRScene() {
     );
   };
 
-  const handlePointerMove = (e: any) => {
-    if (!draggedId || gameState !== "playing") return;
+  const handlePointerMove = (e: any, id?: string) => {
+    const activeId = id || draggedId;
+    if (!activeId || gameState !== "playing") return;
     e.stopPropagation();
 
-    // Use raycast intersection point with the drag plane
-    const intersectPoint = e.point;
-    if (!intersectPoint) return;
+    // Project input position onto a virtual flat vertical plane at z = -0.65 (where table spheres reside)
+    const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.65);
+    const intersectPoint = new THREE.Vector3();
+    
+    if (e.raycaster) {
+      e.raycaster.ray.intersectPlane(plane, intersectPoint);
+    } else if (e.point) {
+      intersectPoint.copy(e.point);
+    } else {
+      return;
+    }
 
     setSpheres((prev) =>
       prev.map((s) =>
-        s.id === draggedId
+        s.id === activeId
           ? {
               ...s,
               position: [
@@ -215,16 +305,30 @@ export default function VRScene() {
     );
   };
 
-  const handlePointerUp = () => {
-    if (!draggedId || gameState !== "playing") return;
-    setDraggedId(null);
+  const handlePointerUp = (e?: any, id?: string) => {
+    const activeId = id || draggedId;
+    if (!activeId || gameState !== "playing") return;
 
-    const activeSphere = spheres.find((s) => s.id === draggedId);
-    if (!activeSphere) return;
+    if (e) {
+      e.stopPropagation();
+      if (e.target && e.pointerId !== undefined) {
+        try {
+          e.target.releasePointerCapture(e.pointerId);
+        } catch (err) {
+          console.warn("Failed to release pointer capture:", err);
+        }
+      }
+    }
+
+    const activeSphere = spheres.find((s) => s.id === activeId);
+    if (!activeSphere) {
+      setDraggedId(null);
+      return;
+    }
 
     const spherePos = new THREE.Vector3(...activeSphere.position);
 
-    // 1. Check Basket slots
+    // 1. Check Basket slots (hollow wood paint buckets)
     let snappedToWheel = false;
     for (let i = 0; i < targetColors.length; i++) {
       const color = targetColors[i];
@@ -233,7 +337,8 @@ export default function VRScene() {
         const slotPos = getSlotPosition(i, targetColors.length);
         const distance = spherePos.distanceTo(slotPos);
 
-        const snapThreshold = targetColors.length === 3 ? 0.18 : 0.12;
+        // Larger, more forgiving snap thresholds (magnet effect) to prevent clipping or drop failures
+        const snapThreshold = targetColors.length === 3 ? 0.35 : 0.25;
         if (distance < snapThreshold) {
           // Correct placement!
           const success = placeColor(color.id, activeSphere.colorId);
@@ -241,10 +346,10 @@ export default function VRScene() {
             audio.playSnap();
             setSpheres((prev) =>
               prev.map((s) =>
-                s.id === draggedId
+                s.id === activeId
                   ? {
                       ...s,
-                      position: [slotPos.x, slotPos.y + 0.035, slotPos.z],
+                      position: [slotPos.x, slotPos.y + 0.045, slotPos.z],
                       status: "placed" as const,
                     }
                   : s
@@ -262,24 +367,27 @@ export default function VRScene() {
       }
     }
 
-    if (snappedToWheel) return;
+    if (snappedToWheel) {
+      setDraggedId(null);
+      return;
+    }
 
     // 2. Check Mixer Slots (only if level >= 2)
     if (level >= 2) {
-      const mixerPos = new THREE.Vector3(-0.45, 0.77, -0.65);
-      const slot1Pos = new THREE.Vector3(-0.53, 0.82, -0.65);
-      const slot2Pos = new THREE.Vector3(-0.37, 0.82, -0.65);
+      const mixerPos = new THREE.Vector3(-0.45, 0.77, -0.48);
+      const slot1Pos = new THREE.Vector3(-0.53, 0.82, -0.51);
+      const slot2Pos = new THREE.Vector3(-0.37, 0.82, -0.51);
 
       const distSlot1 = spherePos.distanceTo(slot1Pos);
       const distSlot2 = spherePos.distanceTo(slot2Pos);
 
       // Snap to Mixer Slot 1
-      if (distSlot1 < 0.12 && !mixerSlot1) {
+      if (distSlot1 < 0.18 && !mixerSlot1) {
         audio.playClick();
         setMixerSlot1(activeSphere);
         setSpheres((prev) =>
           prev.map((s) =>
-            s.id === draggedId
+            s.id === activeId
               ? {
                   ...s,
                   position: [slot1Pos.x, slot1Pos.y, slot1Pos.z],
@@ -291,16 +399,17 @@ export default function VRScene() {
         if (activeSphere.isPrimary) {
           spawnNewPrimary(activeSphere.colorId);
         }
+        setDraggedId(null);
         return;
       }
 
       // Snap to Mixer Slot 2
-      if (distSlot2 < 0.12 && !mixerSlot2) {
+      if (distSlot2 < 0.18 && !mixerSlot2) {
         audio.playClick();
         setMixerSlot2(activeSphere);
         setSpheres((prev) =>
           prev.map((s) =>
-            s.id === draggedId
+            s.id === activeId
               ? {
                   ...s,
                   position: [slot2Pos.x, slot2Pos.y, slot2Pos.z],
@@ -312,6 +421,7 @@ export default function VRScene() {
         if (activeSphere.isPrimary) {
           spawnNewPrimary(activeSphere.colorId);
         }
+        setDraggedId(null);
         return;
       }
     }
@@ -322,7 +432,7 @@ export default function VRScene() {
       audio.playFail();
       setSpheres((prev) =>
         prev.map((s) =>
-          s.id === draggedId
+          s.id === activeId
             ? { ...s, position: [...s.spawnPosition] as [number, number, number] }
             : s
         )
@@ -332,12 +442,13 @@ export default function VRScene() {
       audio.playFail();
       setSpheres((prev) =>
         prev.map((s) =>
-          s.id === draggedId
+          s.id === activeId
             ? { ...s, position: [s.spawnPosition[0], 0.77, s.spawnPosition[2]] as [number, number, number] }
             : s
         )
       );
     }
+    setDraggedId(null);
   };
 
   // Spawn a fresh primary color sphere on the dispenser
@@ -386,7 +497,7 @@ export default function VRScene() {
         );
 
         const colorInfo = ALL_COLORS.find((c) => c.id === outputColorId)!;
-        const outputPos: [number, number, number] = [-0.45, 0.77, -0.42]; // front of mixer
+        const outputPos: [number, number, number] = [-0.45, 0.77, -0.38]; // front of mixer
 
         // Add mixed color sphere to the table
         setSpheres((prev) => [
@@ -556,10 +667,9 @@ export default function VRScene() {
           position={[0, 1.1, -0.65]}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          visible={false}
         >
           <planeGeometry args={[10, 10]} />
-          <meshBasicMaterial transparent opacity={0} />
+          <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       )}
 
@@ -584,48 +694,12 @@ export default function VRScene() {
         ))}
       </group>
 
-      {/* Primary Color Dispensers (Hũ màu thủy tinh) */}
+      {/* Primary Ball Spawn Bases */}
       {DISPENSERS.map((disp, i) => (
-        <group key={i} position={[disp.pos[0], 0.762, disp.pos[2]]}>
-          {/* Glass Jar Body */}
-          <mesh position={[0, 0.04, 0]} castShadow>
-            <cylinderGeometry args={[0.038, 0.038, 0.08, 16]} />
-            <meshStandardMaterial
-              color="#e2e8f0"
-              transparent
-              opacity={0.25}
-              roughness={0.1}
-              metalness={0.9}
-            />
-          </mesh>
-          {/* Jar Lid (Metal rim) */}
-          <mesh position={[0, 0.082, 0]}>
-            <cylinderGeometry args={[0.039, 0.039, 0.008, 16]} />
-            <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} />
-          </mesh>
-          {/* Liquid inside the jar */}
-          <mesh position={[0, 0.02, 0]}>
-            <cylinderGeometry args={[0.035, 0.035, 0.04, 16]} />
-            <meshStandardMaterial
-              color={disp.hex}
-              emissive={disp.hex}
-              emissiveIntensity={0.15}
-              roughness={0.2}
-            />
-          </mesh>
-          {/* Label of the jar */}
-          <Text
-            position={[0, 0.105, 0]}
-            fontSize={0.012}
-            color="#1e293b"
-            fontWeight="bold"
-            anchorX="center"
-            anchorY="middle"
-            font="/Outfit-Regular.ttf"
-          >
-            {ALL_COLORS.find((c) => c.id === disp.colorId)?.nameVi}
-          </Text>
-        </group>
+        <mesh key={i} position={[disp.pos[0], 0.745, disp.pos[2]]} receiveShadow>
+          <cylinderGeometry args={[0.025, 0.025, 0.002, 16]} />
+          <meshStandardMaterial color="#475569" roughness={0.6} />
+        </mesh>
       ))}
 
       {/* 3D Baskets System (Hệ thống giỏ đựng màu - Thùng sơn gỗ treo) */}
@@ -678,11 +752,92 @@ export default function VRScene() {
                 <meshStandardMaterial color="#334155" />
               </mesh>
 
-              {/* Bucket Body (Wooden paint bucket) */}
-              <mesh position={[0, 0.04, 0]} castShadow>
-                <cylinderGeometry args={[0.05, 0.038, 0.08, 16]} />
-                <meshStandardMaterial color="#b45309" roughness={0.85} metalness={0.0} />
-              </mesh>
+              {/* Bucket Body (Wooden paint bucket) - HOLLOW */}
+              <group position={[0, 0.04, 0]}>
+                {/* Outer Wall */}
+                <mesh castShadow receiveShadow>
+                  <cylinderGeometry args={[0.05, 0.038, 0.08, 16, 1, true]} />
+                  <meshStandardMaterial color="#b45309" roughness={0.85} metalness={0.0} side={THREE.FrontSide} />
+                </mesh>
+                
+                {/* Inner Wall */}
+                <mesh receiveShadow>
+                  <cylinderGeometry args={[0.046, 0.034, 0.078, 16, 1, true]} />
+                  <meshStandardMaterial color="#78350f" roughness={0.9} metalness={0.0} side={THREE.BackSide} />
+                </mesh>
+
+                {/* Top Rim */}
+                <mesh position={[0, 0.04, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                  <ringGeometry args={[0.046, 0.05, 16]} />
+                  <meshStandardMaterial color="#b45309" roughness={0.85} metalness={0.0} side={THREE.DoubleSide} />
+                </mesh>
+
+                {/* Paint on the top rim (stain/wet paint facing player) */}
+                <mesh position={[0, 0.0405, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+                  <ringGeometry args={[0.046, 0.05, 16, 1, Math.PI / 4, Math.PI / 2]} />
+                  <meshStandardMaterial
+                    color={color.hex}
+                    roughness={0.2}
+                    emissive={color.hex}
+                    emissiveIntensity={0.2}
+                    side={THREE.DoubleSide}
+                  />
+                </mesh>
+
+                {/* Paint drip 1 (main drip down the front) */}
+                <group>
+                  {/* Tapered drip body starting from rim (y = 0.04 down to y = 0.01) */}
+                  <mesh position={[0, 0.025, 0.048]} rotation={[0.15, 0, 0]}>
+                    <cylinderGeometry args={[0.006, 0.0035, 0.03, 8]} />
+                    <meshStandardMaterial
+                      color={color.hex}
+                      roughness={0.2}
+                      emissive={color.hex}
+                      emissiveIntensity={0.2}
+                    />
+                  </mesh>
+                  {/* Teardrop bulb at the bottom tip of drip 1 */}
+                  <mesh position={[0, 0.01, 0.0465]} castShadow>
+                    <sphereGeometry args={[0.0055, 16, 16]} />
+                    <meshStandardMaterial
+                      color={color.hex}
+                      roughness={0.2}
+                      emissive={color.hex}
+                      emissiveIntensity={0.2}
+                    />
+                  </mesh>
+                </group>
+
+                {/* Paint drip 2 (secondary smaller drip) */}
+                <group>
+                  {/* Tapered drip body starting from rim (y = 0.04 down to y = 0.02) */}
+                  <mesh position={[0.014, 0.03, 0.047]} rotation={[0.15, 0, 0]}>
+                    <cylinderGeometry args={[0.004, 0.002, 0.02, 8]} />
+                    <meshStandardMaterial
+                      color={color.hex}
+                      roughness={0.2}
+                      emissive={color.hex}
+                      emissiveIntensity={0.2}
+                    />
+                  </mesh>
+                  {/* Teardrop bulb at the bottom tip of drip 2 */}
+                  <mesh position={[0.014, 0.02, 0.0455]} castShadow>
+                    <sphereGeometry args={[0.0035, 16, 16]} />
+                    <meshStandardMaterial
+                      color={color.hex}
+                      roughness={0.2}
+                      emissive={color.hex}
+                      emissiveIntensity={0.2}
+                    />
+                  </mesh>
+                </group>
+
+                {/* Bottom Inside Floor */}
+                <mesh position={[0, -0.038, 0]}>
+                  <cylinderGeometry args={[0.034, 0.034, 0.002, 16]} />
+                  <meshStandardMaterial color="#78350f" roughness={0.9} metalness={0.0} />
+                </mesh>
+              </group>
 
               {/* Metallic bucket rings */}
               <mesh position={[0, 0.065, 0]}>
@@ -700,9 +855,9 @@ export default function VRScene() {
                 <meshStandardMaterial color="#64748b" metalness={0.8} roughness={0.2} />
               </mesh>
 
-              {/* Paint Fluid Inside (Emissive surface) */}
-              <mesh position={[0, 0.075, 0]}>
-                <cylinderGeometry args={[0.046, 0.046, 0.002, 16]} />
+              {/* Paint Fluid Inside (Emissive surface at the bottom of the bucket) */}
+              <mesh position={[0, 0.004, 0]}>
+                <cylinderGeometry args={[0.035, 0.035, 0.002, 16]} />
                 <meshStandardMaterial
                   color={color.hex}
                   emissive={color.hex}
@@ -745,7 +900,7 @@ export default function VRScene() {
       {/* Color Synthesizer / Mixer machine (Available in level 2 & 3) */}
       {level >= 2 && (
         <ColorMixer3D
-          position={[-0.45, 0.77, -0.62]}
+          position={[-0.45, 0.77, -0.48]}
           slot1Color={mixerSlot1 ? mixerSlot1.hex : null}
           slot2Color={mixerSlot2 ? mixerSlot2.hex : null}
           onMixClick={handleMix}
@@ -757,59 +912,19 @@ export default function VRScene() {
       <ChromaBot3D />
 
       {/* Render Spheres */}
-      {spheres.map((sphere) => {
-        const isGrabbed = sphere.id === draggedId;
-
-        return (
-          <group
-            key={sphere.id}
-            position={sphere.position}
-            onPointerDown={(e) => handlePointerDown(sphere.id, e)}
-            onPointerOver={() => {
-              if (gameState === "playing" && !isMixing && sphere.status !== "placed") {
-                document.body.style.cursor = "grab";
-              }
-            }}
-            onPointerOut={() => {
-              document.body.style.cursor = "auto";
-            }}
-          >
-            {/* Main sphere geometry */}
-            <mesh castShadow>
-              <sphereGeometry args={[0.042, 32, 32]} />
-              <meshStandardMaterial
-                color={sphere.hex}
-                roughness={0.15}
-                metalness={0.1}
-                emissive={isGrabbed ? sphere.hex : "#000000"}
-                emissiveIntensity={isGrabbed ? 0.3 : 0}
-              />
-            </mesh>
-
-            {/* Glowing ring under grabbed sphere */}
-            {isGrabbed && (
-              <mesh position={[0, -0.05, 0]} rotation={[Math.PI / 2, 0, 0]}>
-                <ringGeometry args={[0.048, 0.052, 24]} />
-                <meshBasicMaterial color={sphere.hex} />
-              </mesh>
-            )}
-
-            {/* Accessibility text overlay (ColorADD shapes) */}
-            {isColorBlindMode && sphere.status !== "placed" && (
-              <Text
-                position={[0, 0.055, 0]}
-                fontSize={0.016}
-                color="#ffffff"
-                anchorX="center"
-                anchorY="middle"
-                font="/Outfit-Regular.ttf"
-              >
-                {sphere.symbol}
-              </Text>
-            )}
-          </group>
-        );
-      })}
+      {spheres.map((sphere) => (
+        <InteractiveSphere
+          key={sphere.id}
+          sphere={sphere}
+          draggedId={draggedId}
+          handlePointerDown={handlePointerDown}
+          handlePointerMove={handlePointerMove}
+          handlePointerUp={handlePointerUp}
+          gameState={gameState}
+          isMixing={isMixing}
+          isColorBlindMode={isColorBlindMode}
+        />
+      ))}
 
       {/* Floating 3D VR Level Up / Reset Button */}
       {isLevelComplete && (
@@ -839,6 +954,295 @@ export default function VRScene() {
           </Text>
         </group>
       )}
+
+      {/* Floating 3D VR 12-Color Mixing Chart Board */}
+      {showColorChart && (
+        <group position={[0, 1.25, -0.45]}>
+          {/* Transparent Holographic Glass Panel */}
+          <mesh castShadow>
+            <boxGeometry args={[0.7, 0.48, 0.015]} />
+            <meshStandardMaterial
+              color="#0f172a"
+              transparent
+              opacity={0.8}
+              roughness={0.15}
+              metalness={0.8}
+            />
+          </mesh>
+          {/* Glowing Border Frame */}
+          <mesh>
+            <boxGeometry args={[0.71, 0.49, 0.016]} />
+            <meshStandardMaterial
+              color="#f59e0b"
+              transparent
+              opacity={0.3}
+              roughness={0.2}
+              emissive="#f59e0b"
+              emissiveIntensity={0.6}
+              wireframe
+            />
+          </mesh>
+
+          {/* Title */}
+          <Text
+            position={[0, 0.2, 0.01]}
+            fontSize={0.022}
+            color="#fef3c7"
+            fontWeight="bold"
+            anchorX="center"
+            anchorY="middle"
+            font="/Outfit-Regular.ttf"
+          >
+            BẢNG PHỐI MÀU 12 SẮC ĐỘ
+          </Text>
+
+          {/* Left Side: Visual 12-Color Circle */}
+          <group position={[-0.17, -0.04, 0.01]}>
+            {/* Draw 12 colored spheres in a circle */}
+            {ALL_COLORS.map((col, index) => {
+              const angle = (index * 2 * Math.PI) / 12 - Math.PI / 2;
+              const radius = 0.11;
+              const x = Math.cos(angle) * radius;
+              const y = Math.sin(angle) * radius;
+              return (
+                <group key={col.id} position={[x, y, 0]}>
+                  {/* Color Sphere */}
+                  <mesh>
+                    <sphereGeometry args={[0.013, 16, 16]} />
+                    <meshStandardMaterial
+                      color={col.hex}
+                      emissive={col.hex}
+                      emissiveIntensity={0.25}
+                      roughness={0.2}
+                    />
+                  </mesh>
+                  {/* Mini label for colors */}
+                  <Text
+                    position={[0, -0.02, 0.005]}
+                    fontSize={0.007}
+                    color="#f1f5f9"
+                    fontWeight="bold"
+                    anchorX="center"
+                    anchorY="middle"
+                    font="/Outfit-Regular.ttf"
+                  >
+                    {col.nameVi}
+                  </Text>
+                </group>
+              );
+            })}
+            
+            {/* Decorative Central Text */}
+            <Text
+              position={[0, 0, 0.005]}
+              fontSize={0.01}
+              color="#94a3b8"
+              fontWeight="bold"
+              anchorX="center"
+              anchorY="middle"
+              font="/Outfit-Regular.ttf"
+            >
+              VÒNG MÀU RYB
+            </Text>
+          </group>
+
+          {/* Right Side: Text Recipe Guide */}
+          <group position={[0.16, 0.11, 0.01]}>
+            {[
+              "CÔNG THỨC PHA MÀU CHÍNH:",
+              "Đỏ + Vàng ➔ Cam",
+              "Vàng + Lam ➔ Lục",
+              "Lam + Đỏ ➔ Tím",
+              "Đỏ + Cam ➔ Đỏ-Cam",
+              "Vàng + Cam ➔ Vàng-Cam",
+              "Vàng + Lục ➔ Vàng-Lục",
+              "Lam + Lục ➔ Lam-Lục",
+              "Lam + Tím ➔ Lam-Tím",
+              "Đỏ + Tím ➔ Đỏ-Tím",
+            ].map((text, idx) => {
+              const isHeader = idx === 0;
+              return (
+                <Text
+                  key={idx}
+                  position={[0, -idx * 0.026, 0]}
+                  fontSize={isHeader ? 0.012 : 0.0105}
+                  color={isHeader ? "#f59e0b" : "#f1f5f9"}
+                  fontWeight={isHeader ? "bold" : "normal"}
+                  anchorX="left"
+                  anchorY="middle"
+                  font="/Outfit-Regular.ttf"
+                >
+                  {text}
+                </Text>
+              );
+            })}
+          </group>
+        </group>
+      )}
     </>
+  );
+}
+
+interface InteractiveSphereProps {
+  sphere: SphereState;
+  draggedId: string | null;
+  handlePointerDown: (id: string, e: any) => void;
+  handlePointerMove: (e: any, id?: string) => void;
+  handlePointerUp: (e?: any, id?: string) => void;
+  gameState: string;
+  isMixing: boolean;
+  isColorBlindMode: boolean;
+}
+
+function InteractiveSphere({
+  sphere,
+  draggedId,
+  handlePointerDown,
+  handlePointerMove,
+  handlePointerUp,
+  gameState,
+  isMixing,
+  isColorBlindMode,
+}: InteractiveSphereProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const velocityY = useRef(0);
+  const isDropped = useRef(false);
+
+  // Use refs to avoid stale closures in useFrame
+  const sphereRef = useRef(sphere);
+  sphereRef.current = sphere;
+  const draggedIdRef = useRef(draggedId);
+  draggedIdRef.current = draggedId;
+
+  const isGrabbed = sphere.id === draggedId;
+  const colorName = ALL_COLORS.find((c) => c.id === sphere.colorId)?.nameVi || "";
+
+  // Initialize position on mount so it doesn't animate from [0, 0, 0]
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.position.set(...sphere.position);
+    }
+  }, []);
+
+  useFrame((state, delta) => {
+    if (!groupRef.current) return;
+
+    const currentSphere = sphereRef.current;
+    const currentDraggedId = draggedIdRef.current;
+    const currentIsGrabbed = currentSphere.id === currentDraggedId;
+
+    // If being dragged, match target position instantly
+    if (currentIsGrabbed) {
+      groupRef.current.position.set(...currentSphere.position);
+      velocityY.current = 0;
+      isDropped.current = false;
+      return;
+    }
+
+    const [targetX, targetY, targetZ] = currentSphere.position;
+    const currentPos = groupRef.current.position;
+
+    if (currentSphere.status === "placed") {
+      // Initialize the drop position from 15cm above the bucket floor
+      if (!isDropped.current) {
+        currentPos.set(targetX, targetY + 0.15, targetZ);
+        velocityY.current = 0;
+        isDropped.current = true;
+        return;
+      }
+
+      // 1. Horizontal snap (very fast)
+      currentPos.x = THREE.MathUtils.lerp(currentPos.x, targetX, 0.25);
+      currentPos.z = THREE.MathUtils.lerp(currentPos.z, targetZ, 0.25);
+
+      // 2. Vertical fall with bounce physics
+      if (Math.abs(velocityY.current) > 0.005 || currentPos.y > targetY) {
+        velocityY.current -= 0.6 * delta; // Gravity acceleration
+        currentPos.y += velocityY.current;
+
+        // Hit the bottom floor of the bucket
+        if (currentPos.y <= targetY) {
+          currentPos.y = targetY;
+          velocityY.current = -velocityY.current * 0.35; // Bounce back up with damping
+        }
+      } else {
+        // Settle exactly at target position
+        currentPos.y = THREE.MathUtils.lerp(currentPos.y, targetY, 0.2);
+        velocityY.current = 0;
+      }
+    } else {
+      // Smooth interpolation for all other states (e.g. returning to dispenser or snapping to mixer)
+      currentPos.x = THREE.MathUtils.lerp(currentPos.x, targetX, 0.15);
+      currentPos.y = THREE.MathUtils.lerp(currentPos.y, targetY, 0.15);
+      currentPos.z = THREE.MathUtils.lerp(currentPos.z, targetZ, 0.15);
+      velocityY.current = 0;
+      isDropped.current = false;
+    }
+  });
+
+  return (
+    <group
+      ref={groupRef}
+      onPointerDown={(e) => handlePointerDown(sphere.id, e)}
+      onPointerMove={(e) => handlePointerMove(e, sphere.id)}
+      onPointerUp={(e) => handlePointerUp(e, sphere.id)}
+      onPointerOver={() => {
+        if (gameState === "playing" && !isMixing && sphere.status !== "placed") {
+          document.body.style.cursor = "grab";
+        }
+      }}
+      onPointerOut={() => {
+        document.body.style.cursor = "auto";
+      }}
+    >
+      {/* Main sphere geometry */}
+      <mesh castShadow>
+        <sphereGeometry args={[0.042, 32, 32]} />
+        <meshStandardMaterial
+          color={sphere.hex}
+          roughness={0.15}
+          metalness={0.1}
+          emissive={isGrabbed ? sphere.hex : "#000000"}
+          emissiveIntensity={isGrabbed ? 0.3 : 0}
+        />
+      </mesh>
+
+      {/* Glowing ring under grabbed sphere */}
+      {isGrabbed && (
+        <mesh position={[0, -0.05, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[0.048, 0.052, 24]} />
+          <meshBasicMaterial color={sphere.hex} />
+        </mesh>
+      )}
+
+      {/* Text label on the sphere */}
+      <Billboard>
+        <Text
+          position={[0, 0, 0.043]}
+          fontSize={0.012}
+          color={sphere.colorId === "yellow" ? "#1e293b" : "#ffffff"}
+          fontWeight="bold"
+          anchorX="center"
+          anchorY="middle"
+          font="/Outfit-Regular.ttf"
+        >
+          {colorName}
+        </Text>
+      </Billboard>
+
+      {/* Accessibility text overlay (ColorADD shapes) */}
+      {isColorBlindMode && sphere.status !== "placed" && (
+        <Text
+          position={[0, 0.055, 0]}
+          fontSize={0.016}
+          color="#ffffff"
+          anchorX="center"
+          anchorY="middle"
+          font="/Outfit-Regular.ttf"
+        >
+          {sphere.symbol}
+        </Text>
+      )}
+    </group>
   );
 }

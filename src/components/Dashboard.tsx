@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useGame, GameMode } from "@/context/GameContext";
+import { useGame, GameMode, ALL_COLORS } from "@/context/GameContext";
 import { audio } from "@/utils/audio";
 import { xrStore } from "@/utils/xrStore";
 import { 
@@ -41,7 +41,11 @@ export default function Dashboard() {
     resetLevel,
     resetGame,
     isLevelComplete,
-    nextLevel
+    nextLevel,
+    showVideoModal,
+    setShowVideoModal,
+    showColorChart,
+    setShowColorChart
   } = useGame();
 
   const [showGuide, setShowGuide] = useState(false);
@@ -60,6 +64,24 @@ export default function Dashboard() {
   useEffect(() => {
     audio.setEnabled(soundOn);
   }, [soundOn]);
+
+  // Listen for 'B' key press to open the video learning modal, 'C' to open color chart
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "b" || e.key === "B") {
+        audio.playClick();
+        setShowVideoModal((prev) => !prev);
+      }
+      if (e.key === "c" || e.key === "C") {
+        audio.playClick();
+        setShowColorChart((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [setShowVideoModal, setShowColorChart]);
 
   const handleStartGame = async (mode: "vr" | "web") => {
     audio.playClick();
@@ -96,6 +118,204 @@ export default function Dashboard() {
 
   const correctCount = targetColors.filter((c) => placedColors[c.id] === c.id).length;
   const totalCount = targetColors.length;
+
+  const renderVideoModal = () => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in pointer-events-auto">
+      <div className="relative w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/90 shadow-2xl overflow-hidden animate-scale-up">
+        {/* Top gradient border */}
+        <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-cyan-500 via-purple-500 to-fuchsia-500" />
+        
+        {/* Header */}
+        <div className="flex justify-between items-center p-4 border-b border-slate-800/80">
+          <div className="flex items-center gap-2">
+            <Compass className="w-5 h-5 text-cyan-400 animate-spin-slow" />
+            <h3 className="text-lg font-black tracking-tight text-slate-100 uppercase">
+              Kiến Thức Màu Sắc & Phối Màu
+            </h3>
+          </div>
+          <button
+            onClick={() => { audio.playClick(); setShowVideoModal(false); }}
+            className="p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200 transition-all hover:bg-slate-900"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="p-4 space-y-4">
+          {/* YouTube Video Container (Aspect Ratio 16:9) */}
+          <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-slate-800 bg-slate-950 shadow-inner">
+            <iframe
+              className="absolute inset-0 w-full h-full"
+              src="https://www.youtube.com/embed/tZh7A5wdfjA?autoplay=1"
+              title="Color Theory for Beginners"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allowFullScreen
+            ></iframe>
+          </div>
+
+          {/* Quick Info text */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-slate-300">
+            <div className="p-3 rounded-lg bg-slate-950/40 border border-slate-800/50">
+              <h4 className="font-bold text-cyan-400 mb-1 flex items-center gap-1">
+                🎨 Cấp Độ Màu Sắc
+              </h4>
+              <ul className="space-y-1 font-light list-disc list-inside">
+                <li><strong>Màu Cơ Bản (Primary):</strong> Đỏ, Vàng, Lam (Không thể tạo ra từ các màu khác).</li>
+                <li><strong>Màu Thứ Cấp (Secondary):</strong> Cam, Lục, Tím (Tạo ra bằng cách trộn 2 màu cơ bản).</li>
+                <li><strong>Màu Bậc Ba (Tertiary):</strong> Đỏ-Cam, Vàng-Cam, Vàng-Lục, v.v. (Trộn màu cơ bản & thứ cấp).</li>
+              </ul>
+            </div>
+            <div className="p-3 rounded-lg bg-slate-950/40 border border-slate-800/50">
+              <h4 className="font-bold text-violet-400 mb-1 flex items-center gap-1">
+                💡 Hướng Dẫn Tương Tác
+              </h4>
+              <ul className="space-y-1 font-light list-disc list-inside">
+                <li>Nhấn phím <strong>B</strong> trên bàn phím hoặc nút <strong>B / Y</strong> trên tay cầm Quest để bật/tắt thư viện video này.</li>
+                <li>Kéo các quả bóng màu từ máy phân phối vào các giỏ gỗ tương ứng ở cuối bàn.</li>
+                <li>Sử dụng máy trộn màu (Mixer) ở góc trái để tạo ra các màu thứ cấp/bậc ba.</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="p-3 border-t border-slate-800/80 bg-slate-950/50 flex justify-end">
+          <button
+            onClick={() => { audio.playClick(); setShowVideoModal(false); }}
+            className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-cyan-600 to-cyan-500 border border-cyan-400 hover:brightness-110 text-white font-bold text-xs transition-all shadow-md"
+          >
+            Đóng & Tiếp Tục Chơi
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderColorChartModal = () => (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in pointer-events-auto">
+      <div className="relative w-full max-w-3xl rounded-2xl border border-slate-800 bg-slate-900/90 shadow-2xl overflow-hidden animate-scale-up">
+        {/* Top gradient border */}
+        <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-amber-500 via-orange-500 to-red-500" />
+        
+        {/* Header */}
+        <div className="flex justify-between items-center p-4 border-b border-slate-800/80">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-amber-400 animate-pulse" />
+            <h3 className="text-lg font-black tracking-tight text-slate-100 uppercase">
+              Bảng Phối Màu 12 Sắc Độ (RYB Color Wheel)
+            </h3>
+          </div>
+          <button
+            onClick={() => { audio.playClick(); setShowColorChart(false); }}
+            className="p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-400 hover:text-slate-200 transition-all hover:bg-slate-900"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Content Body */}
+        <div className="p-5 flex flex-col md:flex-row gap-6 items-center">
+          {/* Left Column: Interactive/Visual 12-color ring in SVG */}
+          <div className="relative w-56 h-56 flex items-center justify-center bg-slate-950/40 rounded-full border border-slate-800 p-2 shrink-0">
+            <svg width="220" height="220" viewBox="0 0 220 220" className="w-full h-full">
+              {/* Outer ring path */}
+              <circle cx="110" cy="110" r="85" fill="none" stroke="#1e293b" strokeWidth="2" strokeDasharray="4 4" />
+              {/* 12 Colors circles */}
+              {ALL_COLORS.map((col, index) => {
+                const angle = (index * 2 * Math.PI) / 12 - Math.PI / 2;
+                const r = 80;
+                const cx = 110 + Math.cos(angle) * r;
+                const cy = 110 + Math.sin(angle) * r;
+                return (
+                  <g key={col.id}>
+                    <circle
+                      cx={cx}
+                      cy={cy}
+                      r="12"
+                      fill={col.hex}
+                      className="cursor-pointer hover:scale-125 transition-transform duration-200 origin-center filter drop-shadow-[0_2px_4px_rgba(0,0,0,0.5)]"
+                    >
+                      <title>{`${col.nameVi} (${col.nameEn})`}</title>
+                    </circle>
+                    {/* Small text symbol inside circles */}
+                    <text
+                      x={cx}
+                      y={cy + 3}
+                      fill="#ffffff"
+                      fontSize="9"
+                      fontWeight="bold"
+                      textAnchor="middle"
+                      className="pointer-events-none font-mono"
+                    >
+                      {col.symbol[0] || ""}
+                    </text>
+                  </g>
+                );
+              })}
+              <text x="110" y="115" fill="#94a3b8" fontSize="10" fontWeight="bold" textAnchor="middle">
+                MÀU RYB
+              </text>
+            </svg>
+          </div>
+
+          {/* Right Column: Recipe details */}
+          <div className="flex-1 w-full space-y-4">
+            <div>
+              <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
+                Quy Tắc Phối Màu 3 Cấp Độ
+              </h4>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-800/60">
+                  <span className="block font-bold text-amber-400 mb-1">Màu Thứ Cấp (Secondary)</span>
+                  <ul className="space-y-0.5 text-slate-300">
+                    <li>Đỏ + Vàng = <strong className="text-[#F97316]">Cam</strong></li>
+                    <li>Vàng + Lam = <strong className="text-[#22C55E]">Lục</strong></li>
+                    <li>Đỏ + Lam = <strong className="text-[#8B5CF6]">Tím</strong></li>
+                  </ul>
+                </div>
+                <div className="p-2.5 rounded-lg bg-slate-950/40 border border-slate-800/60">
+                  <span className="block font-bold text-cyan-400 mb-1">Màu Bậc Ba (Tertiary)</span>
+                  <ul className="space-y-0.5 text-slate-300">
+                    <li>Đỏ + Cam = <span className="text-[#EA580C]">Đỏ-Cam</span></li>
+                    <li>Vàng + Cam = <span className="text-[#F59E0B]">Vàng-Cam</span></li>
+                    <li>Vàng + Lục = <span className="text-[#84CC16]">Vàng-Lục</span></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800/80 text-xs">
+              <span className="block font-bold text-slate-200 mb-1">Chi Tiết Màu Bậc Ba Còn Lại:</span>
+              <div className="grid grid-cols-3 gap-2 text-slate-300">
+                <div>Lam + Lục = <span className="text-[#06B6D4] font-medium">Lam-Lục</span></div>
+                <div>Lam + Tím = <span className="text-[#6366F1] font-medium">Lam-Tím</span></div>
+                <div>Đỏ + Tím = <span className="text-[#D946EF] font-medium">Đỏ-Tím</span></div>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-slate-400 leading-normal">
+              💡 **Mẹo:** Trong chế độ **Khó (Thử thách)**, bạn cần lấy bóng đỏ, vàng, lam từ bàn nâng, cho vào máy trộn (Mixer) rồi bấm nút "Trộn màu" để tổng hợp ra các màu sắc mong muốn!
+            </p>
+          </div>
+        </div>
+        
+        {/* Footer */}
+        <div className="p-3 border-t border-slate-800/80 bg-slate-950/50 flex justify-between items-center">
+          <span className="text-[10px] text-slate-500 font-mono">
+            Phím tắt: nhấn C để bật/tắt bảng này
+          </span>
+          <button
+            onClick={() => { audio.playClick(); setShowColorChart(false); }}
+            className="px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-600 to-amber-500 border border-amber-400 hover:brightness-110 text-white font-bold text-xs transition-all shadow-md"
+          >
+            Đóng bảng
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   // Render main menu
   if (gameState === "menu") {
@@ -159,8 +379,8 @@ export default function Dashboard() {
                       : "bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
                   }`}
                 >
-                  Easy (Thư giãn)
-                  <span className="block text-[10px] font-normal opacity-85">Không giới hạn thời gian</span>
+                  Dễ (Trẻ Em - Full Màu)
+                  <span className="block text-[10px] font-normal opacity-85">Tất cả màu sắc có sẵn</span>
                 </button>
                 <button
                   onClick={() => { audio.playClick(); setGameMode("hard"); }}
@@ -170,8 +390,8 @@ export default function Dashboard() {
                       : "bg-slate-950/40 border-slate-800 text-slate-400 hover:border-slate-700 hover:text-slate-200"
                   }`}
                 >
-                  Hard (Thách thức)
-                  <span className="block text-[10px] font-normal opacity-85">Giới hạn thời gian ngắn</span>
+                  Khó (Thử Thách - Tự Pha)
+                  <span className="block text-[10px] font-normal opacity-85">Chỉ 3 màu gốc, tự pha thêm</span>
                 </button>
               </div>
             </div>
@@ -232,13 +452,27 @@ export default function Dashboard() {
         </div>
 
         {/* Footer, support and guides */}
-        <div className="flex gap-6 mt-8">
+        <div className="flex gap-6 mt-8 flex-wrap">
           <button
             onClick={() => { audio.playClick(); setShowGuide(true); }}
             className="flex items-center gap-1.5 text-xs text-cyan-400/80 hover:text-cyan-300 transition-colors font-mono cursor-pointer"
           >
             <HelpCircle className="w-4 h-4" />
             HƯỚNG DẪN KẾT NỐI META QUEST
+          </button>
+          <button
+            onClick={() => { audio.playClick(); setShowVideoModal(true); }}
+            className="flex items-center gap-1.5 text-xs text-fuchsia-400/80 hover:text-fuchsia-300 transition-colors font-mono cursor-pointer"
+          >
+            <Compass className="w-4 h-4 text-fuchsia-400 animate-pulse" />
+            HỌC MÀU SẮC (PHÍM B)
+          </button>
+          <button
+            onClick={() => { audio.playClick(); setShowColorChart(true); }}
+            className="flex items-center gap-1.5 text-xs text-amber-400/80 hover:text-amber-300 transition-colors font-mono cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
+            BẢNG PHA MÀU (PHÍM C)
           </button>
         </div>
 
@@ -270,7 +504,7 @@ export default function Dashboard() {
                 
                 <div>
                   <h3 className="font-bold text-slate-200 mb-1">Cách 2: Chạy Local HTTPS (Mạng LAN)</h3>
-                  <p>1. Kết nối PC và kính Meta Quest vào cùng một mạng Wi-Fi LAN.</p>
+                  <p>1. PC và kính Meta Quest vào cùng một mạng Wi-Fi LAN.</p>
                   <p>2. Chạy server phát cổng HTTPS công khai bằng cách sử dụng công cụ như <code className="text-cyan-400">ngrok http 3000</code> hoặc công cụ tạo proxy SSL tự ký.</p>
                   <p>3. Nhập địa chỉ HTTPS được tạo ra vào trình duyệt Meta Quest Browser trên kính để load game.</p>
                 </div>
@@ -288,6 +522,10 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+        {/* Render Video Modal */}
+        {showVideoModal && renderVideoModal()}
+        {/* Render Color Chart Modal */}
+        {showColorChart && renderColorChartModal()}
       </div>
     );
   }
@@ -353,7 +591,7 @@ export default function Dashboard() {
           <p className="text-xs text-slate-300">
             💻 <strong>Chơi trên PC:</strong> Dùng chuột click và kéo bóng màu đặt vào các giỏ màu tương ứng ở phía sau bàn.
           </p>
-          <div className="flex justify-center gap-4 mt-2">
+          <div className="flex justify-center gap-3 mt-2 flex-wrap">
             <button
               onClick={toggleColorBlind}
               className={`text-[10px] font-semibold px-2 py-1 rounded border transition-all ${isColorBlindMode ? "bg-amber-500/20 border-amber-400 text-amber-300" : "bg-slate-900 border-slate-800 text-slate-400"}`}
@@ -365,6 +603,12 @@ export default function Dashboard() {
               className={`text-[10px] font-semibold px-2 py-1 rounded border transition-all ${soundOn ? "bg-cyan-500/20 border-cyan-400 text-cyan-300" : "bg-slate-900 border-slate-800 text-slate-400"}`}
             >
               Âm thanh: {soundOn ? "Bật" : "Tắt"}
+            </button>
+            <button
+              onClick={() => { audio.playClick(); setShowVideoModal(true); }}
+              className="text-[10px] font-semibold px-2 py-1 rounded border border-fuchsia-500/30 bg-fuchsia-900/10 text-fuchsia-300 hover:bg-fuchsia-900/30 transition-all"
+            >
+              📖 Học Màu (Phím B)
             </button>
           </div>
 
@@ -381,6 +625,10 @@ export default function Dashboard() {
             </div>
           )}
         </div>
+        {/* Render Video Modal */}
+        {showVideoModal && renderVideoModal()}
+        {/* Render Color Chart Modal */}
+        {showColorChart && renderColorChartModal()}
       </div>
     );
   }
@@ -388,14 +636,20 @@ export default function Dashboard() {
   // Render overlay during VR Active (WebXR session) - standard HUD is shown in 3D, so keep DOM light
   if (gameState === "playing" && isVRActive) {
     return (
-      <div className="absolute top-4 left-4 z-50 pointer-events-auto">
-        <button
-          onClick={() => { audio.playClick(); resetGame(); }}
-          className="px-3 py-1.5 rounded-lg border border-rose-500/40 bg-rose-950/60 text-rose-300 text-xs font-semibold hover:bg-rose-900 transition-all shadow-md flex items-center gap-1"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          Thoát VR Mode
-        </button>
+      <div className="absolute inset-0 pointer-events-none z-10">
+        <div className="absolute top-4 left-4 z-50 pointer-events-auto">
+          <button
+            onClick={() => { audio.playClick(); resetGame(); }}
+            className="px-3 py-1.5 rounded-lg border border-rose-500/40 bg-rose-950/60 text-rose-300 text-xs font-semibold hover:bg-rose-900 transition-all shadow-md flex items-center gap-1"
+          >
+            <LogOut className="w-3.5 h-3.5" />
+            Thoát VR Mode
+          </button>
+        </div>
+        {/* Render Video Modal */}
+        {showVideoModal && renderVideoModal()}
+        {/* Render Color Chart Modal */}
+        {showColorChart && renderColorChartModal()}
       </div>
     );
   }
@@ -462,6 +716,10 @@ export default function Dashboard() {
             QUAY LẠI PHÒNG CHỜ
           </button>
         </div>
+        {/* Render Video Modal */}
+        {showVideoModal && renderVideoModal()}
+        {/* Render Color Chart Modal */}
+        {showColorChart && renderColorChartModal()}
       </div>
     );
   }

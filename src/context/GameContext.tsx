@@ -60,6 +60,10 @@ interface GameContextType {
   resetGame: () => void;
   targetColors: ColorData[];
   isLevelComplete: boolean;
+  showVideoModal: boolean;
+  setShowVideoModal: React.Dispatch<React.SetStateAction<boolean>>;
+  showColorChart: boolean;
+  setShowColorChart: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -74,6 +78,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isColorBlindMode, setIsColorBlindMode] = useState<boolean>(false);
   const [soundOn, setSoundOn] = useState<boolean>(true);
   const [placedColors, setPlacedColors] = useState<Record<string, string>>({});
+  const [showVideoModal, setShowVideoModal] = useState<boolean>(false);
+  const [showColorChart, setShowColorChart] = useState<boolean>(false);
 
   // Colors that need to be placed for the current level
   const targetColors = ALL_COLORS.filter((c) => c.level <= level);
@@ -187,6 +193,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         resetGame,
         targetColors,
         isLevelComplete,
+        showVideoModal,
+        setShowVideoModal,
+        showColorChart,
+        setShowColorChart,
       }}
     >
       {children}
