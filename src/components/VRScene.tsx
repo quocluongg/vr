@@ -161,6 +161,13 @@ export default function VRScene() {
             pose.transform.position.y,
             pose.transform.position.z
           );
+
+          // Convert from WebXR local space to Three.js world space using XROrigin transform
+          if (xrOriginRef.current) {
+            xrOriginRef.current.updateMatrix();
+            xrOriginRef.current.updateMatrixWorld();
+            pos.applyMatrix4(xrOriginRef.current.matrixWorld);
+          }
         }
       }
     }
