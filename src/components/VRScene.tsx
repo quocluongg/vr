@@ -83,217 +83,13 @@ export default function VRScene() {
     setIsVRActive(isPresenting);
   }, [isPresenting, setIsVRActive]);
 
-  // Refs for VR controller grab state
-  const vrDraggedIdRef = useRef<string | null>(null);
-  const vrControllerHandRef = useRef<"left" | "right" | null>(null);
-  const vrTriggerPrevState = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
-  const vrGripPrevState = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
-
-  // Track controller buttons A/X and B/Y state
-  const buttonAPrevState = useRef(false);
-  const buttonBPrevState = useRef(false);
-
-  // VR Locomotion: XROrigin ref for joystick movement
-  const xrOriginRef = useRef<THREE.Group>(null);
-  const snapTurnCooldown = useRef(false); // prevent rapid snap-turns
-  const MOVE_SPEED = 1.8; // m/s
-  const SNAP_ANGLE = Math.PI / 4; // 45 degrees snap turn
-
-  useFrame((state) => {
-    if (!session) return;
-    const xrFrame = state.gl.xr.getFrame ? state.gl.xr.getFrame() : null;
-    const refSpace = originReferenceSpace ?? (state.gl.xr as any).getReferenceSpace?.();
-
-    // Helper: get world position of an XRInputSource's grip or ray space
-    const getInputSourcePos = (inputSource: XRInputSource): THREE.Vector3 => {
-      const pos = new THREE.Vector3();
-      if (xrFrame && refSpace) {
-        const space = inputSource.gripSpace ?? inputSource.targetRaySpace;
-        if (space) {
-          const pose = xrFrame.getPose(space, refSpace);
-          if (pose) {
-            pos.set(
-              pose.transform.position.x,
-              pose.transform.position.y,
-              pose.transform.position.z
-            );
-          }
-        }
-      }
-      return pos;
-    };
-
-    let buttonAPressedThisFrame = false;
-    let buttonBPressedThisFrame = false;
-
-    const inputs = Array.from(session.inputSources);
-    inputs.forEach((inputSource: XRInputSource) => {
-      const gamepad = inputSource.gamepad;
-      if (!gamepad) return;
-
-      // A or X button (Index 4) — toggle color chart
-      const buttonA = gamepad.buttons[4];
-      if (buttonA && buttonA.pressed) buttonAPressedThisFrame = true;
-
-      // B or Y button (Index 5) — toggle video modal
-      const buttonB = gamepad.buttons[5];
-      if (buttonB && buttonB.pressed) buttonBPressedThisFrame = true;
-
-      // ── VR GRAB via Trigger (button 0) or Grip (button 1) ──────────────
-      if (gameState !== "playing" || isMixing) return;
-
-      const hand = inputSource.handedness as "left" | "right";
-      const trigger = gamepad.buttons[0]; // Trigger (index finger)
-      const grip = gamepad.buttons[1];    // Grip (middle finger)
-
-      const isPressed = (trigger && trigger.pressed) || (grip && grip.pressed);
-      const prevPressed = vrTriggerPrevState.current[hand] || vrGripPrevState.current[hand];
-
-      vrTriggerPrevState.current[hand] = !!(trigger && trigger.pressed);
-      vrGripPrevState.current[hand] = !!(grip && grip.pressed);
-
-      // ── GRAB: trigger pressed this frame (edge detection) ──────────────
-      if (isPressed && !prevPressed) {
-        const ctrlPos = getInputSourcePos(inputSource);
-
-        // Find closest non-placed sphere within grab radius
-        let closestId: string | null = null;
-        let closestDist = 0.18; // grab radius in meters
-        spheresRef.current.forEach((s) => {
-          if (s.status === "placed") return;
-          const sPos = new THREE.Vector3(...s.position);
-          const dist = ctrlPos.distanceTo(sPos);
-          if (dist < closestDist) {
-            closestDist = dist;
-            closestId = s.id;
-          }
-        });
-
-        if (closestId) {
-          audio.playGrab();
-          vrDraggedIdRef.current = closestId;
-          vrControllerHandRef.current = hand;
-          setDraggedId(closestId);
-
-          // Release from mixer if needed
-          if (mixerSlot1Ref.current && mixerSlot1Ref.current.id === closestId) setMixerSlot1(null);
-          if (mixerSlot2Ref.current && mixerSlot2Ref.current.id === closestId) setMixerSlot2(null);
-
-          setSpheres((prev) =>
-            prev.map((s) => (s.id === closestId ? { ...s, status: "table" } : s))
-          );
-        }
-      }
-
-      // ── MOVE: while holding, update sphere to follow controller ─────────
-      if (isPressed && vrDraggedIdRef.current && vrControllerHandRef.current === hand) {
-        const ctrlPos = getInputSourcePos(inputSource);
-        if (ctrlPos.lengthSq() > 0) {
-          const id = vrDraggedIdRef.current;
-          setSpheres((prev) =>
-            prev.map((s) =>
-              s.id === id
-                ? {
-                    ...s,
-                    position: [
-                      ctrlPos.x,
-                      Math.max(0.74, ctrlPos.y),
-                      THREE.MathUtils.clamp(ctrlPos.z, -1.3, -0.2),
-                    ] as [number, number, number],
-                  }
-                : s
-            )
-          );
-        }
-      }
-
-      // ── RELEASE: trigger released this frame ────────────────────────────
-      if (!isPressed && prevPressed && vrDraggedIdRef.current && vrControllerHandRef.current === hand) {
-        handlePointerUp();
-        vrDraggedIdRef.current = null;
-        vrControllerHandRef.current = null;
-      }
-    });
-
-    // ── JOYSTICK LOCOMOTION ─────────────────────────────────────────────────
-    if (isPresenting && xrOriginRef.current) {
-      const origin = xrOriginRef.current;
-      const camera = state.camera;
-      const delta = state.clock.getDelta ? state.clock.getDelta() : (1 / 60);
-
-      inputs.forEach((inputSource: XRInputSource) => {
-        const gp = inputSource.gamepad;
-        if (!gp) return;
-        const hand = inputSource.handedness;
-
-        if (hand === "left") {
-          // Left stick: axes[0] = X (strafe), axes[1] = Y (forward/back)
-          const stickX = gp.axes[2] ?? gp.axes[0] ?? 0; // some controllers use axes[2]
-          const stickY = gp.axes[3] ?? gp.axes[1] ?? 0; // some controllers use axes[3]
-          const deadzone = 0.15;
-          if (Math.abs(stickX) > deadzone || Math.abs(stickY) > deadzone) {
-            // Get camera forward/right projected onto the XZ plane
-            const forward = new THREE.Vector3();
-            const right = new THREE.Vector3();
-            camera.getWorldDirection(forward);
-            forward.y = 0;
-            forward.normalize();
-            right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
-
-            const move = new THREE.Vector3();
-            move.addScaledVector(forward, -stickY * MOVE_SPEED * delta);
-            move.addScaledVector(right, stickX * MOVE_SPEED * delta);
-
-            // Clamp to scene bounds so player stays in the meadow
-            origin.position.x = THREE.MathUtils.clamp(origin.position.x + move.x, -8, 8);
-            origin.position.z = THREE.MathUtils.clamp(origin.position.z + move.z, -10, 3);
-          }
-        }
-
-        if (hand === "right") {
-          // Right stick: axes[2] = X for snap-turn
-          const stickX = gp.axes[2] ?? gp.axes[0] ?? 0;
-          const snapDeadzone = 0.6;
-          if (!snapTurnCooldown.current) {
-            if (stickX > snapDeadzone) {
-              // Snap right
-              origin.rotation.y -= SNAP_ANGLE;
-              snapTurnCooldown.current = true;
-            } else if (stickX < -snapDeadzone) {
-              // Snap left
-              origin.rotation.y += SNAP_ANGLE;
-              snapTurnCooldown.current = true;
-            }
-          }
-          // Reset cooldown when stick returns to center
-          if (Math.abs(stickX) < snapDeadzone * 0.5) {
-            snapTurnCooldown.current = false;
-          }
-        }
-      });
-    }
-
-    // Detect button A press transition
-    if (buttonAPressedThisFrame && !buttonAPrevState.current) {
-      audio.playClick();
-      setShowColorChart((prev) => !prev);
-    }
-    buttonAPrevState.current = buttonAPressedThisFrame;
-
-    // Detect button B press transition
-    if (buttonBPressedThisFrame && !buttonBPrevState.current) {
-      audio.playClick();
-      setShowVideoModal((prev) => !prev);
-    }
-    buttonBPrevState.current = buttonBPressedThisFrame;
-  });
-
-  // Active spheres on the table/mixer
+  // ── Core sphere & mixer state (declared early so useFrame/useEffects can reference them) ─
   const [spheres, setSpheres] = useState<SphereState[]>([]);
   const spheresRef = useRef<SphereState[]>([]);
   const [draggedId, setDraggedId] = useState<string | null>(null);
-  
-  // Mixer states
+  const draggedIdRef = useRef<string | null>(null); // always-current ref for VR/useFrame closures
+  useEffect(() => { draggedIdRef.current = draggedId; }, [draggedId]);
+
   const [mixerSlot1, setMixerSlot1] = useState<SphereState | null>(null);
   const [mixerSlot2, setMixerSlot2] = useState<SphereState | null>(null);
   const mixerSlot1Ref = useRef<SphereState | null>(null);
@@ -301,11 +97,237 @@ export default function VRScene() {
   const [isMixing, setIsMixing] = useState(false);
   const isMixingRef = useRef(false);
 
-  // Keep refs in sync so useFrame closures can access latest state without re-render issues
+  // Keep refs in sync
   useEffect(() => { spheresRef.current = spheres; }, [spheres]);
   useEffect(() => { mixerSlot1Ref.current = mixerSlot1; }, [mixerSlot1]);
   useEffect(() => { mixerSlot2Ref.current = mixerSlot2; }, [mixerSlot2]);
   useEffect(() => { isMixingRef.current = isMixing; }, [isMixing]);
+
+  // ── VR Locomotion ref ──────────────────────────────────────────────────────
+  const xrOriginRef = useRef<THREE.Group>(null);
+  const snapTurnCooldown = useRef(false);
+  const MOVE_SPEED = 1.8;
+  const SNAP_ANGLE = Math.PI / 4;
+
+  // ── VR Grab: fully ref-based, zero setState per frame ─────────────────────
+  // Map of sphere id → live THREE.Vector3 position (mutated directly in useFrame)
+  const vrSpherePos = useRef<Map<string, THREE.Vector3>>(new Map());
+  // Map of sphere id → Three.js Group ref (set by InteractiveSphere)
+  const vrSphereObjects = useRef<Map<string, THREE.Group>>(new Map());
+
+  // Controller state refs
+  const vrGrabbedId   = useRef<string | null>(null);
+  const vrGrabbedHand = useRef<"left" | "right" | null>(null);
+  const vrTriggerPrev = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const vrGripPrev    = useRef<{ left: boolean; right: boolean }>({ left: false, right: false });
+  const buttonAPrev   = useRef(false);
+  const buttonBPrev   = useRef(false);
+
+  // Keep vrSpherePos in sync with sphere state (only on state changes, not per frame)
+  useEffect(() => {
+    spheres.forEach((s) => {
+      // Only update if NOT currently grabbed (don't overwrite live position)
+      if (vrGrabbedId.current !== s.id) {
+        let vec = vrSpherePos.current.get(s.id);
+        if (!vec) {
+          vec = new THREE.Vector3(...s.position);
+          vrSpherePos.current.set(s.id, vec);
+        } else {
+          vec.set(...s.position);
+        }
+      }
+    });
+    // Clean up removed spheres
+    const ids = new Set(spheres.map((s) => s.id));
+    vrSpherePos.current.forEach((_, id) => {
+      if (!ids.has(id)) vrSpherePos.current.delete(id);
+    });
+  }, [spheres]);
+
+  // Helper: get world position of a controller's grip/ray space
+  const getCtrlWorldPos = (
+    inputSource: XRInputSource,
+    xrFrame: XRFrame | null,
+    refSpace: XRReferenceSpace | XRBoundedReferenceSpace | null
+  ): THREE.Vector3 => {
+    const pos = new THREE.Vector3();
+    if (xrFrame && refSpace) {
+      const space = inputSource.gripSpace ?? inputSource.targetRaySpace;
+      if (space) {
+        const pose = xrFrame.getPose(space, refSpace as XRReferenceSpace);
+        if (pose) {
+          pos.set(
+            pose.transform.position.x,
+            pose.transform.position.y,
+            pose.transform.position.z
+          );
+        }
+      }
+    }
+    return pos;
+  };
+
+  useFrame((state, delta) => {
+    if (!session) return;
+    const xrFrame: XRFrame | null = (state.gl.xr as any).getFrame?.() ?? null;
+    const refSpace = originReferenceSpace ?? (state.gl.xr as any).getReferenceSpace?.() ?? null;
+
+    let buttonAPressed = false;
+    let buttonBPressed = false;
+
+    const inputs = Array.from(session.inputSources);
+
+    inputs.forEach((inputSource: XRInputSource) => {
+      const gp = inputSource.gamepad;
+      if (!gp) return;
+
+      const hand = inputSource.handedness as "left" | "right";
+
+      // ── Menu buttons ────────────────────────────────────────────────────────
+      if (gp.buttons[4]?.pressed) buttonAPressed = true; // A/X → colour chart
+      if (gp.buttons[5]?.pressed) buttonBPressed = true; // B/Y → main menu
+
+      // ── Grab / Move / Release (only while playing) ──────────────────────────
+      if (gameState !== "playing" || isMixingRef.current) return;
+
+      const triggerPressed = !!(gp.buttons[0]?.pressed);
+      const gripPressed    = !!(gp.buttons[1]?.pressed);
+      const isPressed  = triggerPressed || gripPressed;
+      const prevPressed = vrTriggerPrev.current[hand] || vrGripPrev.current[hand];
+
+      vrTriggerPrev.current[hand] = triggerPressed;
+      vrGripPrev.current[hand]    = gripPressed;
+
+      const ctrlPos = getCtrlWorldPos(inputSource, xrFrame, refSpace);
+      const ctrlIsValid = ctrlPos.lengthSq() > 0;
+
+      // ── GRAB (leading edge) ─────────────────────────────────────────────────
+      if (isPressed && !prevPressed && vrGrabbedId.current === null) {
+        let closestId: string | null = null;
+        let closestDist = 0.20; // grab radius (metres)
+
+        spheresRef.current.forEach((s) => {
+          if (s.status === "placed") return;
+          const sVec = vrSpherePos.current.get(s.id);
+          if (!sVec) return;
+          const dist = ctrlPos.distanceTo(sVec);
+          if (dist < closestDist) { closestDist = dist; closestId = s.id; }
+        });
+
+        if (closestId) {
+          audio.playGrab();
+          vrGrabbedId.current   = closestId;
+          vrGrabbedHand.current = hand;
+          setDraggedId(closestId); // ← only setState on grab
+
+          // Release from mixer if needed (setState OK here, not per-frame)
+          if (mixerSlot1Ref.current?.id === closestId) setMixerSlot1(null);
+          if (mixerSlot2Ref.current?.id === closestId) setMixerSlot2(null);
+
+          setSpheres((prev) =>
+            prev.map((s) => (s.id === closestId ? { ...s, status: "table" } : s))
+          );
+        }
+      }
+
+      // ── MOVE (per frame: mutate object3D directly, NO setState) ─────────────
+      if (isPressed && vrGrabbedId.current && vrGrabbedHand.current === hand && ctrlIsValid) {
+        const id = vrGrabbedId.current;
+        const newX = ctrlPos.x;
+        const newY = Math.max(0.74, ctrlPos.y);
+        const newZ = THREE.MathUtils.clamp(ctrlPos.z, -1.3, -0.2);
+
+        // Update live position ref
+        const posVec = vrSpherePos.current.get(id);
+        if (posVec) posVec.set(newX, newY, newZ);
+
+        // Directly move the 3D object — zero React re-renders
+        const obj = vrSphereObjects.current.get(id);
+        if (obj) obj.position.set(newX, newY, newZ);
+      }
+
+      // ── RELEASE (trailing edge) ─────────────────────────────────────────────
+      if (!isPressed && prevPressed && vrGrabbedId.current && vrGrabbedHand.current === hand) {
+        // Sync final position back into React state before releasing
+        const id = vrGrabbedId.current;
+        const posVec = vrSpherePos.current.get(id);
+        if (posVec) {
+          setSpheres((prev) =>
+            prev.map((s) =>
+              s.id === id
+                ? { ...s, position: [posVec.x, posVec.y, posVec.z] as [number, number, number] }
+                : s
+            )
+          );
+        }
+        vrGrabbedId.current   = null;
+        vrGrabbedHand.current = null;
+        // handlePointerUp reads draggedId from state; call after position sync
+        handlePointerUp();
+      }
+    });
+
+    // ── Joystick locomotion ────────────────────────────────────────────────────
+    if (isPresenting && xrOriginRef.current) {
+      const origin = xrOriginRef.current;
+      const camera = state.camera;
+
+      inputs.forEach((inputSource: XRInputSource) => {
+        const gp = inputSource.gamepad;
+        if (!gp) return;
+        const hand = inputSource.handedness;
+
+        if (hand === "left") {
+          const stickX = gp.axes[2] ?? gp.axes[0] ?? 0;
+          const stickY = gp.axes[3] ?? gp.axes[1] ?? 0;
+          const deadzone = 0.15;
+          if (Math.abs(stickX) > deadzone || Math.abs(stickY) > deadzone) {
+            const forward = new THREE.Vector3();
+            const right   = new THREE.Vector3();
+            camera.getWorldDirection(forward);
+            forward.y = 0; forward.normalize();
+            right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+            const move = new THREE.Vector3();
+            move.addScaledVector(forward, -stickY * MOVE_SPEED * delta);
+            move.addScaledVector(right,    stickX * MOVE_SPEED * delta);
+
+            origin.position.x = THREE.MathUtils.clamp(origin.position.x + move.x, -8,  8);
+            origin.position.z = THREE.MathUtils.clamp(origin.position.z + move.z, -10, 3);
+          }
+        }
+
+        if (hand === "right") {
+          const stickX = gp.axes[2] ?? gp.axes[0] ?? 0;
+          const snapDeadzone = 0.6;
+          if (!snapTurnCooldown.current) {
+            if (stickX > snapDeadzone) {
+              origin.rotation.y -= SNAP_ANGLE;
+              snapTurnCooldown.current = true;
+            } else if (stickX < -snapDeadzone) {
+              origin.rotation.y += SNAP_ANGLE;
+              snapTurnCooldown.current = true;
+            }
+          }
+          if (Math.abs(stickX) < snapDeadzone * 0.5) snapTurnCooldown.current = false;
+        }
+      });
+    }
+
+    // ── Button A/X → toggle colour chart ────────────────────────────────────
+    if (buttonAPressed && !buttonAPrev.current) {
+      audio.playClick();
+      setShowColorChart((prev) => !prev);
+    }
+    buttonAPrev.current = buttonAPressed;
+
+    // ── Button B/Y → open main menu ──────────────────────────────────────────
+    if (buttonBPressed && !buttonBPrev.current) {
+      audio.playClick();
+      setGameState("menu");
+    }
+    buttonBPrev.current = buttonBPressed;
+  });
 
   // Animated canvas texture for VR Video Tutorial (avoids CORS issues with external video URLs)
   const [videoCanvasTexture, setVideoCanvasTexture] = useState<THREE.CanvasTexture | null>(null);
@@ -582,19 +604,25 @@ export default function VRScene() {
   };
 
   const handlePointerUp = (e?: any) => {
-    if (!draggedId || gameState !== "playing") return;
+    // Read from ref so VR-triggered release always gets the live value
+    const activeId = draggedIdRef.current;
+    if (!activeId || gameState !== "playing") return;
 
     if (e) {
       e.stopPropagation();
     }
 
-    const activeSphere = spheres.find((s) => s.id === draggedId);
+    const activeSphere = spheresRef.current.find((s) => s.id === activeId);
     if (!activeSphere) {
       setDraggedId(null);
       return;
     }
 
-    const spherePos = new THREE.Vector3(...activeSphere.position);
+    // For VR grab, use the live position from vrSpherePos (already synced before release)
+    const livePosVec = vrSpherePos.current.get(activeId);
+    const spherePos = livePosVec
+      ? livePosVec.clone()
+      : new THREE.Vector3(...activeSphere.position);
 
     // 1. Check Basket slots (hollow wood paint buckets)
     let snappedToWheel = false;
@@ -614,7 +642,7 @@ export default function VRScene() {
             audio.playSnap();
             setSpheres((prev) =>
               prev.map((s) =>
-                s.id === draggedId
+                s.id === activeId
                   ? {
                       ...s,
                       position: [slotPos.x, slotPos.y + 0.045, slotPos.z],
@@ -642,7 +670,6 @@ export default function VRScene() {
 
     // 2. Check Mixer Slots (only if level >= 2)
     if (level >= 2) {
-      const mixerPos = new THREE.Vector3(-0.45, 0.77, -0.48);
       const slot1Pos = new THREE.Vector3(-0.53, 0.82, -0.51);
       const slot2Pos = new THREE.Vector3(-0.37, 0.82, -0.51);
 
@@ -650,12 +677,12 @@ export default function VRScene() {
       const distSlot2 = spherePos.distanceTo(slot2Pos);
 
       // Snap to Mixer Slot 1
-      if (distSlot1 < 0.18 && !mixerSlot1) {
+      if (distSlot1 < 0.18 && !mixerSlot1Ref.current) {
         audio.playClick();
         setMixerSlot1(activeSphere);
         setSpheres((prev) =>
           prev.map((s) =>
-            s.id === draggedId
+            s.id === activeId
               ? {
                   ...s,
                   position: [slot1Pos.x, slot1Pos.y, slot1Pos.z],
@@ -672,12 +699,12 @@ export default function VRScene() {
       }
 
       // Snap to Mixer Slot 2
-      if (distSlot2 < 0.18 && !mixerSlot2) {
+      if (distSlot2 < 0.18 && !mixerSlot2Ref.current) {
         audio.playClick();
         setMixerSlot2(activeSphere);
         setSpheres((prev) =>
           prev.map((s) =>
-            s.id === draggedId
+            s.id === activeId
               ? {
                   ...s,
                   position: [slot2Pos.x, slot2Pos.y, slot2Pos.z],
@@ -700,7 +727,7 @@ export default function VRScene() {
       audio.playFail();
       setSpheres((prev) =>
         prev.map((s) =>
-          s.id === draggedId
+          s.id === activeId
             ? { ...s, position: [...s.spawnPosition] as [number, number, number] }
             : s
         )
@@ -710,7 +737,7 @@ export default function VRScene() {
       audio.playFail();
       setSpheres((prev) =>
         prev.map((s) =>
-          s.id === draggedId
+          s.id === activeId
             ? { ...s, position: [s.spawnPosition[0], 0.77, s.spawnPosition[2]] as [number, number, number] }
             : s
         )
@@ -1185,6 +1212,8 @@ export default function VRScene() {
           key={sphere.id}
           sphere={sphere}
           draggedId={draggedId}
+          vrGrabbedIdRef={vrGrabbedId}
+          vrSphereObjects={vrSphereObjects}
           handlePointerDown={handlePointerDown}
           gameState={gameState}
           isMixing={isMixing}
@@ -1872,6 +1901,8 @@ function VRButton({
 interface InteractiveSphereProps {
   sphere: SphereState;
   draggedId: string | null;
+  vrGrabbedIdRef: React.MutableRefObject<string | null>;
+  vrSphereObjects: React.MutableRefObject<Map<string, THREE.Group>>;
   handlePointerDown: (id: string, e: any) => void;
   gameState: string;
   isMixing: boolean;
@@ -1881,6 +1912,8 @@ interface InteractiveSphereProps {
 function InteractiveSphere({
   sphere,
   draggedId,
+  vrGrabbedIdRef,
+  vrSphereObjects,
   handlePointerDown,
   gameState,
   isMixing,
@@ -1899,12 +1932,18 @@ function InteractiveSphere({
   const isGrabbed = sphere.id === draggedId;
   const colorName = ALL_COLORS.find((c) => c.id === sphere.colorId)?.nameVi || "";
 
-  // Initialize position on mount so it doesn't animate from [0, 0, 0]
+  // Register this group into the VR object map so useFrame can move it directly
   useEffect(() => {
     if (groupRef.current) {
+      vrSphereObjects.current.set(sphere.id, groupRef.current);
+      // Initialize position immediately on mount
       groupRef.current.position.set(...sphere.position);
     }
-  }, []);
+    return () => {
+      vrSphereObjects.current.delete(sphere.id);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sphere.id]);
 
   useFrame((state, delta) => {
     if (!groupRef.current) return;
@@ -1913,7 +1952,15 @@ function InteractiveSphere({
     const currentDraggedId = draggedIdRef.current;
     const currentIsGrabbed = currentSphere.id === currentDraggedId;
 
-    // If being dragged, match target position instantly
+    // If being grabbed by VR controller, the parent useFrame moves the object directly.
+    // Skip animation entirely to avoid conflicting position writes.
+    if (vrGrabbedIdRef.current === currentSphere.id) {
+      velocityY.current = 0;
+      isDropped.current = false;
+      return;
+    }
+
+    // If being dragged via mouse/touch (PC mode), match target position instantly
     if (currentIsGrabbed) {
       groupRef.current.position.set(...currentSphere.position);
       velocityY.current = 0;
