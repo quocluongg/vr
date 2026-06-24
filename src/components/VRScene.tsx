@@ -327,6 +327,30 @@ export default function VRScene() {
       setGameState("menu");
     }
     buttonBPrev.current = buttonBPressed;
+
+    // ── MOVE: dedicated step, runs once per frame ─────────────────────────────
+    // Updates vrSpherePos; InteractiveSphere.useFrame reads it and sets its own position.
+    if (vrGrabbedId.current && vrGrabbedHand.current && gameState === "playing") {
+      const grabbingSource = inputs.find(
+        (src) => src.handedness === vrGrabbedHand.current
+      );
+      if (grabbingSource?.gamepad) {
+        const gp = grabbingSource.gamepad;
+        const stillHeld = !!(gp.buttons[0]?.pressed) || !!(gp.buttons[1]?.pressed);
+        if (stillHeld) {
+          const ctrlPos = getCtrlWorldPos(grabbingSource, xrFrame, refSpace);
+          if (ctrlPos.lengthSq() > 0) {
+            const id   = vrGrabbedId.current;
+            const newX = ctrlPos.x;
+            const newY = Math.max(0.74, ctrlPos.y);
+            const newZ = THREE.MathUtils.clamp(ctrlPos.z, -1.3, -0.2);
+            // Write to vrSpherePos — child InteractiveSphere.useFrame reads this each frame
+            const posVec = vrSpherePos.current.get(id);
+            if (posVec) posVec.set(newX, newY, newZ);
+          }
+        }
+      }
+    }
   });
 
   // Animated canvas texture for VR Video Tutorial (avoids CORS issues with external video URLs)
@@ -670,8 +694,11 @@ export default function VRScene() {
 
     // 2. Check Mixer Slots (only if level >= 2)
     if (level >= 2) {
-      const slot1Pos = new THREE.Vector3(-0.53, 0.82, -0.51);
-      const slot2Pos = new THREE.Vector3(-0.37, 0.82, -0.51);
+      // Mixer machine at [-0.45, 0.77, -0.48]; slots at local offsets:
+      //   Slot A: [-0.07, 0.01, -0.04] → world [-0.52, 0.78, -0.52]
+      //   Slot B: [+0.07, 0.01, -0.04] → world [-0.38, 0.78, -0.52]
+      const slot1Pos = new THREE.Vector3(-0.52, 0.78, -0.52);
+      const slot2Pos = new THREE.Vector3(-0.38, 0.78, -0.52);
 
       const distSlot1 = spherePos.distanceTo(slot1Pos);
       const distSlot2 = spherePos.distanceTo(slot2Pos);
@@ -1213,7 +1240,7 @@ export default function VRScene() {
           sphere={sphere}
           draggedId={draggedId}
           vrGrabbedIdRef={vrGrabbedId}
-          vrSphereObjects={vrSphereObjects}
+          vrSpherePosRef={vrSpherePos}
           handlePointerDown={handlePointerDown}
           gameState={gameState}
           isMixing={isMixing}
@@ -1902,7 +1929,7 @@ interface InteractiveSphereProps {
   sphere: SphereState;
   draggedId: string | null;
   vrGrabbedIdRef: React.MutableRefObject<string | null>;
-  vrSphereObjects: React.MutableRefObject<Map<string, THREE.Group>>;
+  vrSpherePosRef: React.MutableRefObject<Map<string, THREE.Vector3>>;
   handlePointerDown: (id: string, e: any) => void;
   gameState: string;
   isMixing: boolean;
@@ -1913,7 +1940,7 @@ function InteractiveSphere({
   sphere,
   draggedId,
   vrGrabbedIdRef,
-  vrSphereObjects,
+  vrSpherePosRef,
   handlePointerDown,
   gameState,
   isMixing,
@@ -1932,16 +1959,11 @@ function InteractiveSphere({
   const isGrabbed = sphere.id === draggedId;
   const colorName = ALL_COLORS.find((c) => c.id === sphere.colorId)?.nameVi || "";
 
-  // Register this group into the VR object map so useFrame can move it directly
+  // Initialize position on mount
   useEffect(() => {
     if (groupRef.current) {
-      vrSphereObjects.current.set(sphere.id, groupRef.current);
-      // Initialize position immediately on mount
       groupRef.current.position.set(...sphere.position);
     }
-    return () => {
-      vrSphereObjects.current.delete(sphere.id);
-    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sphere.id]);
 
@@ -1952,9 +1974,13 @@ function InteractiveSphere({
     const currentDraggedId = draggedIdRef.current;
     const currentIsGrabbed = currentSphere.id === currentDraggedId;
 
-    // If being grabbed by VR controller, the parent useFrame moves the object directly.
-    // Skip animation entirely to avoid conflicting position writes.
+    // VR-grabbed: read the live position from vrSpherePos (written by parent useFrame MOVE step)
+    // The child owns groupRef, so it's the only one that sets its position.
     if (vrGrabbedIdRef.current === currentSphere.id) {
+      const livePos = vrSpherePosRef.current.get(currentSphere.id);
+      if (livePos) {
+        groupRef.current.position.set(livePos.x, livePos.y, livePos.z);
+      }
       velocityY.current = 0;
       isDropped.current = false;
       return;
